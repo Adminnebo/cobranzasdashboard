@@ -9,6 +9,7 @@ const { getCachedData, cacheInfo } = require('./services/cache');
 const { computeMetrics } = require('./services/metrics');
 const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
+const { requireAuth, publicConfig, authEnabled } = require('./services/auth');
 const history = require('./services/history');
 
 const app = express();
@@ -25,9 +26,16 @@ app.get('/api/health', (req, res) => {
     ok: true,
     model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
     ai: process.env.OPENAI_API_KEY ? 'openai' : 'heuristica',
+    auth: authEnabled,
     cache: cacheInfo(),
   });
 });
+
+// Config pública para inicializar Supabase en el frontend (no expone secretos).
+app.get('/api/config', (req, res) => res.json(publicConfig()));
+
+// A partir de aquí, todas las rutas /api requieren sesión (si la auth está activada).
+app.use('/api', requireAuth);
 
 // Fuentes + métricas puras (servidas desde el caché con TTL).
 app.get('/api/data', async (req, res) => {

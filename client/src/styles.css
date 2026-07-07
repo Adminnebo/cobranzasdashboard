@@ -161,6 +161,34 @@ body {
 /* ── Empty state ── */
 .empty-state { text-align: center; padding: 56px 24px; color: var(--text-secondary); line-height: 1.6; }
 
+/* ── Login ── */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--page); }
+.login-card {
+  width: 100%; max-width: 380px; background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 18px; padding: 34px 30px; box-shadow: var(--shadow); text-align: center;
+}
+.login-logo { font-size: 2.2rem; margin-bottom: 6px; }
+.login-card h1 { font-size: 1.4rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+.login-sub { color: var(--text-secondary); font-size: 0.88rem; margin: 0 0 22px; }
+.login-label { display: block; text-align: left; font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin: 12px 0 5px; }
+.login-input {
+  width: 100%; font: inherit; font-size: 0.9rem; padding: 11px 13px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+}
+.login-input:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
+.login-error { margin-top: 14px; color: var(--critical); font-size: 0.82rem; background: color-mix(in srgb, var(--critical) 10%, transparent); padding: 9px 12px; border-radius: 9px; }
+.login-btn { width: 100%; margin-top: 20px; padding: 12px; font-size: 0.92rem; }
+.login-foot { margin: 16px 0 0; font-size: 0.76rem; color: var(--text-muted); }
+
+/* ── Badge de usuario / logout ── */
+.user-badge { gap: 8px; max-width: 220px; }
+.user-badge { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logout-btn {
+  font: inherit; font-size: 0.68rem; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.03em;
+  border: none; background: none; color: var(--critical); padding: 0 0 0 4px; border-left: 1px solid var(--border); margin-left: 2px;
+}
+.logout-btn:hover { text-decoration: underline; }
+
 /* ── Section headings ── */
 .section-title { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin: 32px 2px 12px; }
 .section-title:first-of-type { margin-top: 8px; }

@@ -11,6 +11,8 @@ import ClientesTable from './components/ClientesTable';
 import AiPanel from './components/AiPanel';
 import HistoryCard from './components/HistoryCard';
 import AssistantView from './components/AssistantView';
+import Login from './components/Login';
+import { useAuth } from './auth/AuthProvider';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊' },
@@ -20,6 +22,7 @@ const TABS = [
 ];
 
 export default function App() {
+  const { loading: authLoading, authed, enabled: authEnabled, user, signOut } = useAuth();
   const [tab, setTab] = useState('dashboard');
   const [data, setData] = useState(null);
   const [analysis, setAnalysis] = useState(null);
@@ -40,6 +43,7 @@ export default function App() {
   const REFRESH_MS = 60000; // auto-refresh de llamadas cada minuto
 
   useEffect(() => {
+    if (!authed) return; // no cargar datos sin sesión
     let mounted = true;
 
     const loadData = async (isPoll) => {
@@ -66,7 +70,7 @@ export default function App() {
 
     const id = setInterval(() => loadData(true), REFRESH_MS);
     return () => { mounted = false; clearInterval(id); };
-  }, []);
+  }, [authed]);
 
   const refreshAnalysis = () => {
     setAnalyzing(true);
@@ -94,6 +98,14 @@ export default function App() {
       };
     });
   }, [data, analysis]);
+
+  // ── Gate de autenticación ──
+  if (authLoading) {
+    return <div className="app"><div className="loading"><div className="spinner" />Cargando…</div></div>;
+  }
+  if (!authed) {
+    return <Login />;
+  }
 
   if (error) {
     return (
@@ -134,6 +146,12 @@ export default function App() {
           <button className="btn secondary" onClick={refreshAnalysis} disabled={analyzing}>
             {analyzing ? 'Analizando…' : '↻ Re-analizar'}
           </button>
+          {authEnabled && user && (
+            <span className="badge user-badge" title={user.email}>
+              {user.email}
+              <button className="logout-btn" onClick={signOut} title="Cerrar sesión">Salir</button>
+            </span>
+          )}
         </div>
       </header>
 

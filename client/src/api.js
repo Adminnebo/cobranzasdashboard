@@ -1,5 +1,12 @@
+import { getAuthToken } from './auth/token';
+
+function authHeaders(extra) {
+  const t = getAuthToken();
+  return { ...(extra || {}), ...(t ? { Authorization: `Bearer ${t}` } : {}) };
+}
+
 async function get(path) {
-  const res = await fetch(path);
+  const res = await fetch(path, { headers: authHeaders() });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `HTTP ${res.status}`);
@@ -10,7 +17,7 @@ async function get(path) {
 async function post(path, payload) {
   const res = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
