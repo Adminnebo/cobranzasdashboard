@@ -9,7 +9,8 @@ const { getCachedData, cacheInfo } = require('./services/cache');
 const { computeMetrics } = require('./services/metrics');
 const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
-const { requireAuth, publicConfig, authEnabled } = require('./services/auth');
+const { requireAuth, requireAdmin, publicConfig, authEnabled } = require('./services/auth');
+const users = require('./services/users');
 const history = require('./services/history');
 
 const app = express();
@@ -100,6 +101,42 @@ app.post('/api/history/snapshot', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Info del usuario actual (para el frontend: mostrar email + si es admin).
+app.get('/api/me', (req, res) => {
+  res.json({
+    email: req.user ? req.user.email : null,
+    isAdmin: req.user ? !!req.user.isAdmin : false,
+  });
+});
+
+// ── Administración de usuarios (solo admins) ──
+app.get('/api/users', requireAdmin, async (req, res) => {
+  try { res.json({ users: await users.listUsers() }); }
+  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+app.post('/api/users', requireAdmin, async (req, res) => {
+  try {
+    const { email, password, admin } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email y contraseña requeridos' });
+    if (String(password).length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    res.json(await users.createUser({ email: String(email).trim(), password: String(password), admin: !!admin }));
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+app.patch('/api/users/:id', requireAdmin, async (req, res) => {
+  try { res.json(await users.updateUser(req.params.id, req.body || {})); }
+  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
+  try {
+    // Evitar que un admin se borre a sí mismo.
+    if (req.user && req.params.id === req.user.id) return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
+    res.json(await users.deleteUser(req.params.id));
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 // En producción, el mismo server sirve el build del cliente (SPA).

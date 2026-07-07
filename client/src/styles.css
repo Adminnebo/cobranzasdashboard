@@ -158,6 +158,19 @@ body {
 }
 .dr-date:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
 
+/* ── Administración de usuarios ── */
+.user-form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.user-admin-check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; }
+.user-admin-check input { width: 15px; height: 15px; }
+.mini-btn {
+  font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer; margin-right: 6px;
+  padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-secondary);
+}
+.mini-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text-primary); }
+.mini-btn.danger { color: var(--critical); }
+.mini-btn:disabled { opacity: 0.4; cursor: default; }
+
 /* ── Empty state ── */
 .empty-state { text-align: center; padding: 56px 24px; color: var(--text-secondary); line-height: 1.6; }
 

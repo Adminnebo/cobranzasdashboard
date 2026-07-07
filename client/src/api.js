@@ -27,7 +27,36 @@ async function post(path, payload) {
   return res.json();
 }
 
+async function del(path) {
+  const res = await fetch(path, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function patch(path, payload) {
+  const res = await fetch(path, {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export const askAI = (question) => post('/api/ask', { question });
+
+// ── Auth / usuarios ──
+export const fetchMe = () => get('/api/me');
+export const listUsers = () => get('/api/users');
+export const createUser = (payload) => post('/api/users', payload);
+export const updateUser = (id, payload) => patch(`/api/users/${id}`, payload);
+export const deleteUser = (id) => del(`/api/users/${id}`);
 
 export const fetchData = () => get('/api/data');
 export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '?refresh=1' : ''}`);
