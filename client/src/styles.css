@@ -171,6 +171,33 @@ body {
 .mini-btn.danger { color: var(--critical); }
 .mini-btn:disabled { opacity: 0.4; cursor: default; }
 
+/* ── Switch enabled/disabled ── */
+.switch {
+  width: 38px; height: 21px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-2); cursor: pointer; padding: 0; position: relative;
+  transition: background .15s; flex: none;
+}
+.switch .knob {
+  position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--text-muted); transition: transform .15s, background .15s;
+}
+.switch.on { background: var(--good); border-color: transparent; }
+.switch.on .knob { transform: translateX(17px); background: #fff; }
+.switch:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Barra de acciones masivas ── */
+.bulkbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 12px 14px; background: var(--surface-2); border-bottom: 1px solid var(--grid);
+}
+.bulk-count { font-size: 0.82rem; font-weight: 700; color: var(--text-primary); margin-right: 4px; }
+.call-btn { background: var(--good); padding: 7px 14px; font-size: 0.8rem; }
+.mini-btn.call { color: var(--good-ink); }
+.bulk-msg { padding: 10px 14px; font-size: 0.82rem; border-bottom: 1px solid var(--grid); }
+.bulk-msg.ok { color: var(--good-ink); background: color-mix(in srgb, var(--good) 8%, transparent); }
+.bulk-msg.err { color: var(--critical); background: color-mix(in srgb, var(--critical) 8%, transparent); }
+tr.row-sel { background: color-mix(in srgb, var(--series-1) 8%, transparent); }
+
 /* ── Empty state ── */
 .empty-state { text-align: center; padding: 56px 24px; color: var(--text-secondary); line-height: 1.6; }
 

@@ -78,7 +78,7 @@ function buildContext(clientes, llamadas, metrics, history) {
 async function ask(question) {
   const { clientes, llamadas } = await getCachedData();
   const metrics = computeMetrics(clientes, llamadas);
-  const history = getDailyHistory();
+  const history = await getDailyHistory().catch(() => []);
 
   if (!process.env.OPENAI_API_KEY) {
     return {

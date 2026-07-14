@@ -11,6 +11,8 @@ const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
 const { requireAuth, requireAdmin, publicConfig, authEnabled } = require('./services/auth');
 const users = require('./services/users');
+const clienteConfig = require('./services/clienteConfig');
+const calls = require('./services/calls');
 const history = require('./services/history');
 
 const app = express();
@@ -38,15 +40,39 @@ app.get('/api/config', (req, res) => res.json(publicConfig()));
 // A partir de aquí, todas las rutas /api requieren sesión (si la auth está activada).
 app.use('/api', requireAuth);
 
-// Fuentes + métricas puras (servidas desde el caché con TTL).
+// Fuentes + métricas puras (servidas desde el caché con TTL), con el flag
+// enabled de cada cliente cruzado desde Supabase (cliente_config).
 app.get('/api/data', async (req, res) => {
   try {
     const { clientes, llamadas, source, cachedAt, cacheAgeMs } = await getCachedData();
-    const metrics = computeMetrics(clientes, llamadas);
-    res.json({ source, clientes, llamadas, metrics, cachedAt, cacheAgeMs });
+
+    let enabledMap = new Map();
+    try {
+      enabledMap = await clienteConfig.getEnabledMap();
+    } catch (e) {
+      console.error('[cliente_config] no disponible, todos disabled:', e.message);
+    }
+    const conFlag = clientes.map((c) => ({ ...c, enabled: enabledMap.get(c.phone) === true }));
+
+    const metrics = computeMetrics(conFlag, llamadas);
+    res.json({ source, clientes: conFlag, llamadas, metrics, cachedAt, cacheAgeMs });
   } catch (err) {
     console.error('[/api/data]', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Activar / desactivar clientes para el cron de llamadas (uno o varios).
+app.patch('/api/clientes/enabled', async (req, res) => {
+  try {
+    const { phones, enabled } = req.body || {};
+    if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
+    if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Falta enabled (boolean)' });
+    const out = await clienteConfig.setEnabled(phones, enabled, req.user ? req.user.email : null);
+    res.json(out);
+  } catch (err) {
+    console.error('[/api/clientes/enabled]', err);
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -84,10 +110,10 @@ app.post('/api/ask', async (req, res) => {
   }
 });
 
-// Historial de deuda por día (agregado) + histórico crudo.
-app.get('/api/history', (req, res) => {
+// Historial de deuda por día (agregado desde Supabase).
+app.get('/api/history', async (req, res) => {
   try {
-    res.json({ daily: history.getDailyHistory(), tz: history.TZ });
+    res.json({ daily: await history.getDailyHistory(), tz: history.TZ });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -98,6 +124,39 @@ app.post('/api/history/snapshot', async (req, res) => {
   try {
     const snap = await history.takeSnapshot('manual');
     res.json(snap);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Dispara llamadas a los teléfonos indicados (manual = 1, bulk = varios).
+// El disparo corre en segundo plano: responde de inmediato con el conteo.
+app.post('/api/calls/trigger', async (req, res) => {
+  try {
+    const { phones, origen } = req.body || {};
+    if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
+    if (!calls.callsEnabled) return res.status(503).json({ error: 'Llamadas no configuradas (falta N8N_CALL_URL)' });
+
+    const { clientes } = await getCachedData();
+    const byPhone = new Map(clientes.map((c) => [c.phone, c]));
+    const objetivo = phones.map((p) => byPhone.get(String(p))).filter(Boolean);
+    if (!objetivo.length) return res.status(404).json({ error: 'Ningún cliente coincide con esos teléfonos' });
+
+    const por = req.user ? req.user.email : null;
+    const resultado = await calls.triggerBatch(objetivo, origen === 'bulk' ? 'bulk' : 'manual', por);
+    res.json(resultado);
+  } catch (err) {
+    console.error('[/api/calls/trigger]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Últimos disparos (para auditar qué se lanzó y cuándo).
+app.get('/api/calls/log', async (req, res) => {
+  try {
+    const rows = await require('./services/supabaseDb')
+      .select('llamada_disparo', '?select=*&order=created_at.desc&limit=100');
+    res.json({ disparos: rows || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -165,5 +224,28 @@ app.listen(PORT, async () => {
   const opts = { timezone: history.TZ };
   cron.schedule('0 4 * * *', () => history.takeSnapshot('AM').catch((e) => console.error('[cron AM]', e.message)), opts);
   cron.schedule('0 16 * * *', () => history.takeSnapshot('PM').catch((e) => console.error('[cron PM]', e.message)), opts);
-  console.log(`  Tomas programadas: 04:00 y 16:00 (${history.TZ})\n`);
+  console.log(`  Tomas programadas: 04:00 y 16:00 (${history.TZ})`);
+
+  // Cron diario de llamadas: 10:00 a todos los clientes habilitados (secuencial).
+  const CALL_CRON = process.env.CALL_CRON || '0 10 * * *';
+  cron.schedule(CALL_CRON, () => runDailyCalls().catch((e) => console.error('[cron llamadas]', e.message)), opts);
+  console.log(`  Llamadas diarias: ${CALL_CRON} (${history.TZ}) · ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}\n`);
 });
+
+// Recorre los clientes habilitados y les lanza la llamada, uno por uno.
+async function runDailyCalls() {
+  if (!calls.callsEnabled) {
+    console.log('[cron llamadas] omitido: falta N8N_CALL_URL');
+    return;
+  }
+  const phones = await clienteConfig.getEnabledPhones();
+  if (!phones.length) {
+    console.log('[cron llamadas] no hay clientes habilitados.');
+    return;
+  }
+  const { clientes } = await getCachedData(true);
+  const byPhone = new Map(clientes.map((c) => [c.phone, c]));
+  const objetivo = phones.map((p) => byPhone.get(p)).filter(Boolean);
+  console.log(`[cron llamadas] disparando a ${objetivo.length} cliente(s) habilitado(s)...`);
+  await calls.triggerBatch(objetivo, 'cron', null);
+}

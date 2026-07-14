@@ -81,6 +81,11 @@ export default function App() {
     fetchAnalysis(true).then(setAnalysis).catch((e) => setError(e.message)).finally(() => setAnalyzing(false));
   };
 
+  // Recarga los datos (tras activar/desactivar clientes o lanzar llamadas).
+  const reloadData = () => {
+    fetchData().then((d) => { setData(d); setLastUpdate(new Date()); }).catch(() => {});
+  };
+
   // Une cartera (deuda) + análisis IA + intención de la última llamada.
   const rows = useMemo(() => {
     if (!data || !analysis) return [];
@@ -180,7 +185,7 @@ export default function App() {
 
       {tab === 'clientes' && (
         <div className="card" style={{ padding: 0 }}>
-          <ClientesTable clientes={data.clientes} />
+          <ClientesTable clientes={data.clientes} onChanged={reloadData} />
         </div>
       )}
 
@@ -228,6 +233,8 @@ function DashboardView({ m, analysis, analyzing, rows, history }) {
           foot={`${pct((m.deudaVencida / m.deudaTotal) * 100)} del total`} footTone="bad" />
         <KpiCard label="Recuperación estimada (IA)" value={analysis ? money(analysis.recuperacion_estimada) : '…'} accent="var(--good)"
           foot={analysis ? `${pct((analysis.recuperacion_estimada / m.deudaVencida) * 100)} de lo vencido` : 'Analizando…'} footTone="good" />
+        <KpiCard label="Activos para llamar" value={num(m.clientesHabilitados || 0)} accent="var(--good)"
+          foot={`de ${num(m.totalClientes)} · cron diario 10:00`} />
         <KpiCard label="Tasa de contacto" value={pct(m.tasaContacto)} accent="var(--series-2)"
           foot={`${num(m.clientesContactados)}/${num(m.totalClientes)} contactados`} />
         <KpiCard label="Compromisos de pago" value={num(m.llamadasConCompromiso)} accent="var(--series-5)"

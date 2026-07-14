@@ -102,6 +102,7 @@ function computeMetrics(clientes, llamadas) {
 
   return {
     totalClientes,
+    clientesHabilitados: clientes.filter((c) => c.enabled).length,
     clientesContactados,
     tasaContacto: totalClientes ? round2((clientesContactados / totalClientes) * 100) : 0,
     totalLlamadas: llamadas.length,

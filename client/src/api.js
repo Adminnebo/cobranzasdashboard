@@ -51,6 +51,10 @@ async function patch(path, payload) {
 
 export const askAI = (question) => post('/api/ask', { question });
 
+// ── Llamadas ──
+export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enabled', { phones, enabled });
+export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trigger', { phones, origen });
+
 // ── Auth / usuarios ──
 export const fetchMe = () => get('/api/me');
 export const listUsers = () => get('/api/users');
