@@ -3,6 +3,7 @@ import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { setClientesEnabled, triggerCalls } from '../api';
 import Pager from './Pager';
+import QueuePanel from './QueuePanel';
 
 const sortValue = {
   name: (c) => (c.name || '').toLowerCase(),
@@ -114,6 +115,7 @@ export default function ClientesTable({ clientes, onChanged }) {
     try {
       const r = await fn();
       setMsg({ type: 'ok', text: typeof okMsg === 'function' ? okMsg(r) : okMsg });
+      setQueueKey((k) => k + 1); // refresca el panel de la cola
       if (onChanged) onChanged();
     } catch (e) {
       setMsg({ type: 'err', text: e.message });
@@ -125,19 +127,27 @@ export default function ClientesTable({ clientes, onChanged }) {
       `${phones.length} cliente(s) ${enabled ? 'activados' : 'desactivados'}.`);
 
   const llamar = (phones) => {
+    const h = Math.floor(phones.length / 60), mm = phones.length % 60;
+    const eta = h ? `${h}h ${mm}min` : `${mm} min`;
     if (phones.length > 5 && !window.confirm(
-      `Vas a lanzar ${phones.length} llamadas reales (1 por minuto, ~${phones.length} min). ¿Continuar?`
+      `Vas a encolar ${phones.length} llamadas REALES.\n\n` +
+      `Se lanzan 1 por minuto dentro del horario laboral (9:00–18:00, L–V).\n` +
+      `Tiempo estimado: ~${eta}.\n\n¿Continuar?`
     )) return;
+
     return run(() => triggerCalls(phones, phones.length > 1 ? 'bulk' : 'manual'), (r) => {
-      if (r.enSegundoPlano) {
-        return `${r.encoladas} llamada(s) encoladas · 1 por minuto (~${r.duracionMin} min)` +
-          (r.truncado ? ` · truncado a ${r.encoladas} de ${r.total} por seguridad` : '');
+      if (r.inmediata) {
+        return r.fallidas
+          ? `Llamada fallida: ${(r.detalles && r.detalles[0] && r.detalles[0].error) || 'error'}`
+          : '📞 Llamada lanzada.';
       }
-      return r.fallidas
-        ? `Llamada fallida: ${(r.detalles && r.detalles[0] && r.detalles[0].error) || 'error'}`
-        : '📞 Llamada lanzada.';
+      const eh = Math.floor(r.minutosEstimados / 60), em = r.minutosEstimados % 60;
+      return `${r.encoladas} encoladas${r.yaEnCola ? ` (${r.yaEnCola} ya estaban en cola)` : ''} · ` +
+        `1 por minuto · ~${eh ? `${eh}h ${em}min` : `${em} min`}` +
+        (r.enHorario ? '' : ' · en pausa hasta el horario laboral');
     });
   };
+  const [queueKey, setQueueKey] = useState(0);
 
   const selArr = [...sel];
   const caret = (k) => (k === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
@@ -149,6 +159,8 @@ export default function ClientesTable({ clientes, onChanged }) {
 
   return (
     <div>
+      <QueuePanel refreshKey={queueKey} />
+
       <div className="toolbar">
         <input className="search" placeholder="Buscar por nombre, código, teléfono o email…"
           value={q} onChange={(e) => setQ(e.target.value)} />

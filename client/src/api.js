@@ -54,6 +54,8 @@ export const askAI = (question) => post('/api/ask', { question });
 // ── Llamadas ──
 export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enabled', { phones, enabled });
 export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trigger', { phones, origen });
+export const fetchQueue = () => get('/api/calls/queue');
+export const cancelQueue = () => del('/api/calls/queue');
 
 // ── Auth / usuarios ──
 export const fetchMe = () => get('/api/me');

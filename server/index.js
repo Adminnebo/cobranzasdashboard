@@ -13,6 +13,7 @@ const { requireAuth, requireAdmin, publicConfig, authEnabled } = require('./serv
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
 const calls = require('./services/calls');
+const queue = require('./services/queue');
 const history = require('./services/history');
 
 const app = express();
@@ -129,8 +130,8 @@ app.post('/api/history/snapshot', async (req, res) => {
   }
 });
 
-// Dispara llamadas a los teléfonos indicados (manual = 1, bulk = varios).
-// El disparo corre en segundo plano: responde de inmediato con el conteo.
+// Lanza llamadas. 1 cliente = inmediata. Varios = se ENCOLAN (1 por minuto,
+// dentro del horario laboral). La cola vive en Supabase y sobrevive reinicios.
 app.post('/api/calls/trigger', async (req, res) => {
   try {
     const { phones, origen } = req.body || {};
@@ -139,33 +140,37 @@ app.post('/api/calls/trigger', async (req, res) => {
 
     const { clientes } = await getCachedData();
     const byPhone = new Map(clientes.map((c) => [c.phone, c]));
-    const objetivo = phones.map((p) => byPhone.get(String(p))).filter(Boolean);
+    const objetivo = phones.map((p) => byPhone.get(String(p))).filter((c) => c && c.phone);
     if (!objetivo.length) return res.status(404).json({ error: 'Ningún cliente coincide con esos teléfonos' });
 
     const por = req.user ? req.user.email : null;
-    const tipo = origen === 'bulk' ? 'bulk' : 'manual';
 
-    // Una sola llamada: espera y devuelve el resultado real (es instantáneo).
+    // Una sola: se dispara al momento (no espera turno en la cola).
     if (objetivo.length === 1) {
-      const resultado = await calls.triggerBatch(objetivo, tipo, por);
-      return res.json(resultado);
+      const r = await calls.triggerBatch(objetivo, 'manual', por);
+      return res.json({ ...r, inmediata: true });
     }
 
-    // Varias: se encolan en segundo plano (1 por minuto -> tomaría minutos/horas).
-    // Respondemos de inmediato para no bloquear al navegador.
-    const minutos = Math.max(0, Math.min(objetivo.length, calls.MAX_BATCH) - 1) * (calls.DELAY_MS / 60000);
-    calls.triggerBatch(objetivo, tipo, por).catch((e) => console.error('[calls bulk]', e.message));
-    res.json({
-      encoladas: Math.min(objetivo.length, calls.MAX_BATCH),
-      total: objetivo.length,
-      truncado: objetivo.length > calls.MAX_BATCH,
-      duracionMin: Math.round(minutos),
-      enSegundoPlano: true,
-    });
+    // Varias: a la cola persistente.
+    const r = await queue.enqueue(objetivo, origen === 'cron' ? 'cron' : 'bulk', por);
+    const st = await queue.status();
+    res.json({ ...r, encolado: true, enHorario: st.enHorario, horario: st.horario, minutosEstimados: st.minutosEstimados });
   } catch (err) {
     console.error('[/api/calls/trigger]', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Estado de la cola de llamadas.
+app.get('/api/calls/queue', async (req, res) => {
+  try { res.json(await queue.status()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Cancelar todas las llamadas pendientes en la cola.
+app.delete('/api/calls/queue', async (req, res) => {
+  try { res.json(await queue.cancelarTodo()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Últimos disparos (para auditar qué se lanzó y cuándo).
@@ -243,14 +248,21 @@ app.listen(PORT, async () => {
   cron.schedule('0 16 * * *', () => history.takeSnapshot('PM').catch((e) => console.error('[cron PM]', e.message)), opts);
   console.log(`  Tomas programadas: 04:00 y 16:00 (${history.TZ})`);
 
-  // Cron diario de llamadas: 10:00 a todos los clientes habilitados (secuencial).
+  // Cron diario: a las 10:00 ENCOLA a todos los clientes habilitados.
   const CALL_CRON = process.env.CALL_CRON || '0 10 * * *';
-  cron.schedule(CALL_CRON, () => runDailyCalls().catch((e) => console.error('[cron llamadas]', e.message)), opts);
-  console.log(`  Llamadas diarias: ${CALL_CRON} (${history.TZ}) · ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}\n`);
+  cron.schedule(CALL_CRON, () => encolarHabilitados().catch((e) => console.error('[cron llamadas]', e.message)), opts);
+
+  // Worker de la cola: cada minuto saca UNA llamada (si está en horario).
+  cron.schedule('* * * * *', () => queue.tick().catch((e) => console.error('[cola tick]', e.message)), opts);
+
+  const st = await queue.status().catch(() => null);
+  console.log(`  Llamadas: ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}`);
+  console.log(`  Cron diario (encola habilitados): ${CALL_CRON} (${history.TZ})`);
+  console.log(`  Cola: 1 llamada/min · horario ${st ? st.horario : '9:00–18:00 (L–V)'}${st ? ` · pendientes: ${st.pendientes}` : ''}\n`);
 });
 
-// Recorre los clientes habilitados y les lanza la llamada, uno por uno.
-async function runDailyCalls() {
+// Encola a todos los clientes habilitados (el worker los irá llamando 1/min).
+async function encolarHabilitados() {
   if (!calls.callsEnabled) {
     console.log('[cron llamadas] omitido: falta N8N_CALL_URL');
     return;
@@ -262,7 +274,7 @@ async function runDailyCalls() {
   }
   const { clientes } = await getCachedData(true);
   const byPhone = new Map(clientes.map((c) => [c.phone, c]));
-  const objetivo = phones.map((p) => byPhone.get(p)).filter(Boolean);
-  console.log(`[cron llamadas] disparando a ${objetivo.length} cliente(s) habilitado(s)...`);
-  await calls.triggerBatch(objetivo, 'cron', null);
+  const objetivo = phones.map((p) => byPhone.get(p)).filter((c) => c && c.phone);
+  const r = await queue.enqueue(objetivo, 'cron', null);
+  console.log(`[cron llamadas] ${r.encoladas} encoladas (${r.yaEnCola} ya estaban) · pendientes: ${r.totalPendientes}`);
 }

@@ -49,8 +49,16 @@ const upsert = (table, rows, onConflict) =>
 const insert = (table, rows) =>
   call(table, {
     method: 'POST',
-    headers: { Prefer: 'return=representation' },
+    headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
   });
 
-module.exports = { select, upsert, insert, dbEnabled, SUPABASE_URL };
+/** UPDATE. Ej: update('llamada_cola', '?id=eq.5', { estado: 'enviada' }) */
+const update = (table, query, patch) =>
+  call(`${table}${query}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(patch),
+  });
+
+module.exports = { select, upsert, insert, update, dbEnabled, SUPABASE_URL };

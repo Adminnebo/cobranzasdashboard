@@ -186,6 +186,20 @@ body {
 .switch:disabled { opacity: 0.5; cursor: default; }
 .no-phone { color: var(--text-muted); font-size: 0.9rem; }
 
+/* ── Panel de la cola de llamadas ── */
+.queue-panel {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 11px 14px; border-bottom: 1px solid var(--grid);
+  font-size: 0.83rem; color: var(--text-secondary); background: var(--surface-2);
+}
+.queue-panel.active { background: color-mix(in srgb, var(--good) 9%, transparent); }
+.queue-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--baseline); flex: none; }
+.queue-dot.live { background: var(--good); animation: pulse 1.8s ease-in-out infinite; }
+.queue-main { margin-right: auto; }
+.queue-main strong { color: var(--text-primary); }
+.queue-paused { color: var(--warning); font-weight: 600; }
+.queue-hours { font-size: 0.76rem; color: var(--text-muted); }
+
 /* ── Panel de filtros ── */
 .filters { padding: 14px; background: var(--surface-2); border-bottom: 1px solid var(--grid); }
 .filter-presets { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; }

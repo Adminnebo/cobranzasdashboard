@@ -79,6 +79,7 @@ async function log(row) {
   try { await db.insert('llamada_disparo', row); }
   catch (e) { console.error('[calls] log falló:', e.message); }
 }
+const logDisparo = log;
 
 /**
  * Dispara llamadas SECUENCIALMENTE con pausa entre cada una.
@@ -113,4 +114,4 @@ async function triggerBatch(clientes, origen = 'manual', por = null) {
   return { lanzadas, fallidas, truncado, total: clientes.length, detalles };
 }
 
-module.exports = { triggerBatch, triggerOne, callsEnabled, MAX_BATCH, DELAY_MS };
+module.exports = { triggerBatch, triggerOne, logDisparo, callsEnabled, MAX_BATCH, DELAY_MS };
