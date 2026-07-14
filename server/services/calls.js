@@ -18,8 +18,16 @@
 const db = require('./supabaseDb');
 
 const CALL_URL = process.env.N8N_CALL_URL || '';
+// Sub-agente de seguimiento: llama a quien prometió pagar y no pagó.
+// Si no se configura, cae al agente principal.
+const FOLLOWUP_URL = process.env.N8N_FOLLOWUP_URL || '';
 const CALL_METHOD = (process.env.N8N_CALL_METHOD || 'POST').toUpperCase();
 const N8N_API_KEY = process.env.N8N_API_KEY || '';
+
+/** URL según el agente: 'seguimiento' usa el sub-agente; el resto el principal. */
+function urlDe(agente) {
+  return agente === 'seguimiento' && FOLLOWUP_URL ? FOLLOWUP_URL : CALL_URL;
+}
 // 1 llamada por minuto por defecto: el proveedor admite máx. 10 simultáneas y
 // una llamada dura ~2-3 min, así nunca se acumulan más de ~3 a la vez.
 const DELAY_MS = parseInt(process.env.CALL_DELAY_MS || '60000', 10);
@@ -61,13 +69,19 @@ function callHeaders() {
   return h;
 }
 
-/** Dispara UNA llamada. Devuelve { ok, detalle }. */
-async function triggerOne(cliente) {
+/** Dispara UNA llamada. `agente`: 'principal' | 'seguimiento'. */
+async function triggerOne(cliente, agente = 'principal') {
   if (!callsEnabled) throw new Error('Llamadas no configuradas (falta N8N_CALL_URL)');
-  const res = await fetch(CALL_URL, {
+  const url = urlDe(agente);
+  const payload = buildPayload(cliente);
+  if (agente === 'seguimiento') {
+    payload.motivo = 'promesa_incumplida';
+    if (cliente.fecha_prometida) payload.fecha_prometida = cliente.fecha_prometida;
+  }
+  const res = await fetch(url, {
     method: CALL_METHOD,
     headers: callHeaders(),
-    body: CALL_METHOD === 'GET' ? undefined : JSON.stringify(buildPayload(cliente)),
+    body: CALL_METHOD === 'GET' ? undefined : JSON.stringify(payload),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`n8n ${res.status}: ${text.slice(0, 200)}`);
@@ -114,4 +128,7 @@ async function triggerBatch(clientes, origen = 'manual', por = null) {
   return { lanzadas, fallidas, truncado, total: clientes.length, detalles };
 }
 
-module.exports = { triggerBatch, triggerOne, logDisparo, callsEnabled, MAX_BATCH, DELAY_MS };
+module.exports = {
+  triggerBatch, triggerOne, logDisparo, callsEnabled, MAX_BATCH, DELAY_MS,
+  followupEnabled: !!FOLLOWUP_URL,
+};

@@ -44,7 +44,7 @@ function dentroDeHorario(d = new Date()) {
  * Agrega clientes a la cola. Evita duplicar teléfonos que ya estén pendientes.
  * @returns { encoladas, yaEnCola, totalPendientes }
  */
-async function enqueue(clientes, origen = 'bulk', por = null) {
+async function enqueue(clientes, origen = 'bulk', por = null, agente = 'principal') {
   const llamables = clientes.filter((c) => c.phone);
   if (!llamables.length) return { encoladas: 0, yaEnCola: 0, totalPendientes: await countPendientes() };
 
@@ -63,6 +63,7 @@ async function enqueue(clientes, origen = 'bulk', por = null) {
       deuda_vencida: c.deuda_vencida,
       credito_ofrecido: c.credito_ofrecido,
       origen,
+      agente,
       estado: 'pendiente',
       encolada_por: por,
     }));
@@ -105,11 +106,12 @@ async function tick() {
       credito_ofrecido: Number(item.credito_ofrecido) || 0,
     };
 
+    const agente = item.agente || 'principal';
     try {
-      await calls.triggerOne(cliente);
+      await calls.triggerOne(cliente, agente);
       await marcar(item.id, 'enviada', null);
       await calls.logDisparo({ phone: item.phone, nombre: item.nombre, origen: item.origen, estado: 'ok', disparado_por: item.encolada_por });
-      console.log(`[cola] ✅ ${item.phone} (${item.nombre || 's/n'})`);
+      console.log(`[cola] ✅ ${item.phone} (${item.nombre || 's/n'}) · agente: ${agente}`);
     } catch (err) {
       await marcar(item.id, 'error', err.message);
       await calls.logDisparo({ phone: item.phone, nombre: item.nombre, origen: item.origen, estado: 'error', detalle: err.message, disparado_por: item.encolada_por });

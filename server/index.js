@@ -14,6 +14,7 @@ const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
 const calls = require('./services/calls');
 const queue = require('./services/queue');
+const promesas = require('./services/promesas');
 const history = require('./services/history');
 
 const app = express();
@@ -167,6 +168,18 @@ app.get('/api/calls/queue', async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Promesas de pago: resumen (pendientes / cumplidas / incumplidas).
+app.get('/api/promesas', async (req, res) => {
+  try { res.json(await promesas.resumen()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Fuerza la revisión de promesas ahora (útil para probar sin esperar al cron).
+app.post('/api/promesas/revisar', async (req, res) => {
+  try { res.json(await revisarPromesas()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Cancelar todas las llamadas pendientes en la cola.
 app.delete('/api/calls/queue', async (req, res) => {
   try { res.json(await queue.cancelarTodo()); }
@@ -255,11 +268,26 @@ app.listen(PORT, async () => {
   // Worker de la cola: cada minuto saca UNA llamada (si está en horario).
   cron.schedule('* * * * *', () => queue.tick().catch((e) => console.error('[cola tick]', e.message)), opts);
 
+  // Promesas: cada día a las 9:30 (antes del cron de las 10) detecta promesas
+  // nuevas y encola al SUB-AGENTE a quienes prometieron y no pagaron.
+  const PROMESA_CRON = process.env.PROMESA_CRON || '30 9 * * *';
+  cron.schedule(PROMESA_CRON, () => revisarPromesas().catch((e) => console.error('[cron promesas]', e.message)), opts);
+  console.log(`  Promesas: ${PROMESA_CRON} (${history.TZ}) · sub-agente ${calls.followupEnabled ? 'ACTIVO' : 'no configurado (usa el principal)'} · gracia ${promesas.GRACIA_DIAS} día(s)`);
+
   const st = await queue.status().catch(() => null);
   console.log(`  Llamadas: ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}`);
   console.log(`  Cron diario (encola habilitados): ${CALL_CRON} (${history.TZ})`);
   console.log(`  Cola: 1 llamada/min · horario ${st ? st.horario : '9:00–18:00 (L–V)'}${st ? ` · pendientes: ${st.pendientes}` : ''}\n`);
 });
+
+// Promesas de pago: (1) detecta promesas nuevas en las llamadas, (2) revisa las
+// vencidas y encola al sub-agente a quien prometió y sigue debiendo.
+async function revisarPromesas() {
+  const { clientes, llamadas } = await getCachedData(true);
+  const sync = await promesas.sincronizar(llamadas, clientes);
+  const rev = await promesas.revisarIncumplidas(clientes);
+  return { ...sync, ...rev };
+}
 
 // Encola a todos los clientes habilitados (el worker los irá llamando 1/min).
 async function encolarHabilitados() {
