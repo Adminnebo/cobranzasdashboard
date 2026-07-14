@@ -28,16 +28,27 @@ const callsEnabled = !!CALL_URL;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Teléfono en E.164 con código de país (+1 para RD/NANP).
+ * Internamente guardamos 10 dígitos; el agente lo necesita con el +1.
+ */
+function toE164(phone) {
+  const d = String(phone || '').replace(/\D/g, '');
+  if (!d) return '';
+  return d.length === 10 ? `+1${d}` : `+${d}`;
+}
+
+/**
  * Payload que se manda al agente por cada cliente.
- * Ajustar aquí si el curl del agente espera otros nombres de campo.
+ * Ajustar aquí si el webhook espera otros nombres de campo.
  */
 function buildPayload(c) {
   return {
-    phone: c.phone,
-    nombre: c.name,
-    empresa: c.empresa,
+    phone: toE164(c.phone),
     deuda_total: c.deuda_total,
     deuda_vencida: c.deuda_vencida,
+    // Extras por si el agente los usa (no estorban si los ignora):
+    nombre: c.name,
+    empresa: c.empresa,
     credito_ofrecido: c.credito_ofrecido,
   };
 }

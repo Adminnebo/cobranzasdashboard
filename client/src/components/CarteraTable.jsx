@@ -29,7 +29,7 @@ export default function CarteraTable({ rows }) {
           </thead>
           <tbody>
             {slice.map((r, i) => (
-              <tr key={r.phone}>
+              <tr key={`${r.phone || 'sin-tel'}-${start + i}`}>
                 <td style={{ color: 'var(--text-muted)' }}>{start + i + 1}</td>
                 <td>
                   <div style={{ fontWeight: 600 }}>{r.name}</div>

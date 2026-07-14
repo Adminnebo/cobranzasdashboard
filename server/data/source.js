@@ -136,7 +136,10 @@ async function fetchFromN8n() {
     callWebhook(process.env.N8N_WEBHOOK_CLIENTES),
     hasLlamadas ? callWebhook(process.env.N8N_WEBHOOK_LLAMADAS) : Promise.resolve([]),
   ]);
-  const clientes = toArray(rawC, 'clientes').map(normalizeCliente).filter((c) => c.phone);
+  // Los clientes SIN teléfono se conservan: su deuda cuenta en los totales,
+  // solo que no son llamables (no hay a quién marcar). El filtro anterior los
+  // descartaba y su deuda desaparecía de la cartera.
+  const clientes = toArray(rawC, 'clientes').map(normalizeCliente);
   const llamadas = toArray(rawL, 'llamadas').map(normalizeLlamada).filter((l) => l.phone);
   return { clientes, llamadas };
 }

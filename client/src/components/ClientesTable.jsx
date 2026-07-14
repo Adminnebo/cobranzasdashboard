@@ -150,26 +150,32 @@ export default function ClientesTable({ clientes, onChanged }) {
             {slice.map((c, i) => {
               const pv = c.deuda_total > 0 ? Math.round((c.deuda_vencida / c.deuda_total) * 100) : 0;
               return (
-                <tr key={c.phone + '-' + (c.codigo || i)} className={sel.has(c.phone) ? 'row-sel' : ''}>
+                <tr key={(c.codigo || c.id || i) + '-' + i} className={sel.has(c.phone) ? 'row-sel' : ''}>
                   <td>
-                    <input type="checkbox" checked={sel.has(c.phone)} onChange={() => toggleOne(c.phone)} />
+                    <input type="checkbox" disabled={!c.phone} checked={sel.has(c.phone)} onChange={() => toggleOne(c.phone)} />
                   </td>
                   <td>
-                    <button
-                      className={`switch ${c.enabled ? 'on' : ''}`}
-                      disabled={busy}
-                      title={c.enabled ? 'Activo: entra en el cron diario' : 'Inactivo: no se llama'}
-                      onClick={() => setEnabled([c.phone], !c.enabled)}
-                    >
-                      <span className="knob" />
-                    </button>
+                    {c.phone ? (
+                      <button
+                        className={`switch ${c.enabled ? 'on' : ''}`}
+                        disabled={busy}
+                        title={c.enabled ? 'Activo: entra en el cron diario' : 'Inactivo: no se llama'}
+                        onClick={() => setEnabled([c.phone], !c.enabled)}
+                      >
+                        <span className="knob" />
+                      </button>
+                    ) : (
+                      <span className="no-phone" title="Sin teléfono: su deuda cuenta, pero no se puede llamar">—</span>
+                    )}
                   </td>
                   <td style={{ color: 'var(--text-muted)' }}>{start + i + 1}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{c.name}</div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{c.empresa}</div>
                   </td>
-                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>{phoneFmt(c.phone)}</td>
+                  <td style={{ fontVariantNumeric: 'tabular-nums', color: c.phone ? undefined : 'var(--text-muted)' }}>
+                    {c.phone ? phoneFmt(c.phone) : 'sin teléfono'}
+                  </td>
                   <td className="num">{money(c.credito_ofrecido)}</td>
                   <td className="num">{money(c.deuda_total)}</td>
                   <td className="num" style={{ color: c.deuda_vencida > 0 ? 'var(--critical)' : 'var(--text-muted)' }}>
@@ -177,7 +183,9 @@ export default function ClientesTable({ clientes, onChanged }) {
                   </td>
                   <td className="num" style={{ color: pv > 75 ? 'var(--critical)' : pv > 25 ? 'var(--serious)' : 'var(--text-secondary)' }}>{pv}%</td>
                   <td>
-                    <button className="mini-btn call" disabled={busy} onClick={() => llamar([c.phone])}>📞 Llamar ahora</button>
+                    <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
+                      📞 Llamar ahora
+                    </button>
                   </td>
                 </tr>
               );

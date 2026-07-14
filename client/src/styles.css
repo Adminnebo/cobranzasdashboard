@@ -184,6 +184,7 @@ body {
 .switch.on { background: var(--good); border-color: transparent; }
 .switch.on .knob { transform: translateX(17px); background: #fff; }
 .switch:disabled { opacity: 0.5; cursor: default; }
+.no-phone { color: var(--text-muted); font-size: 0.9rem; }
 
 /* ── Barra de acciones masivas ── */
 .bulkbar {
