@@ -15,24 +15,56 @@ const sortValue = {
 };
 const TEXT_COLS = new Set(['name']);
 
+const EMPTY_FILTERS = {
+  estado: 'todos',        // todos | activos | inactivos
+  vencidoMin: '', vencidoMax: '',
+  totalMin: '', totalMax: '',
+  pvMin: '',              // % vencido mínimo
+  utilMin: '',            // % utilización de crédito mínimo
+  soloLlamables: false,   // con teléfono
+};
+
+const pctVenc = (c) => (c.deuda_total > 0 ? (c.deuda_vencida / c.deuda_total) * 100 : 0);
+const pctUtil = (c) => (c.credito_ofrecido > 0 ? (c.deuda_total / c.credito_ofrecido) * 100 : 0);
+
 export default function ClientesTable({ clientes, onChanged }) {
   const [q, setQ] = useState('');
-  const [soloHabilitados, setSoloHabilitados] = useState(false);
+  const [f, setF] = useState(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState('deuda_vencida');
   const [sortDir, setSortDir] = useState('desc');
   const [sel, setSel] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
+  const setFilter = (k, v) => setF((prev) => ({ ...prev, [k]: v }));
+  const numOr = (v, def) => (v === '' || v === null || isNaN(Number(v)) ? def : Number(v));
+
   const toggleSort = (key) => {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir(TEXT_COLS.has(key) ? 'asc' : 'desc'); }
   };
 
+  // ── Filtrado ──
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
+    const vMin = numOr(f.vencidoMin, -Infinity), vMax = numOr(f.vencidoMax, Infinity);
+    const tMin = numOr(f.totalMin, -Infinity), tMax = numOr(f.totalMax, Infinity);
+    const pvMin = numOr(f.pvMin, -Infinity);
+    const utilMin = numOr(f.utilMin, -Infinity);
+
     return clientes.filter((c) => {
-      if (soloHabilitados && !c.enabled) return false;
+      if (f.estado === 'activos' && !c.enabled) return false;
+      if (f.estado === 'inactivos' && c.enabled) return false;
+      if (f.soloLlamables && !c.phone) return false;
+
+      const venc = c.deuda_vencida || 0;
+      const tot = c.deuda_total || 0;
+      if (venc < vMin || venc > vMax) return false;
+      if (tot < tMin || tot > tMax) return false;
+      if (pctVenc(c) < pvMin) return false;
+      if (pctUtil(c) < utilMin) return false;
+
       if (!t) return true;
       return (
         (c.name || '').toLowerCase().includes(t) ||
@@ -41,7 +73,7 @@ export default function ClientesTable({ clientes, onChanged }) {
         String(c.phone || '').includes(t.replace(/\D/g, ''))
       );
     });
-  }, [clientes, q, soloHabilitados]);
+  }, [clientes, q, f]);
 
   const sorted = useMemo(() => {
     const val = sortValue[sortKey];
@@ -57,12 +89,16 @@ export default function ClientesTable({ clientes, onChanged }) {
 
   const { slice, start, pager } = usePaged(sorted, 25);
 
+  // Solo los que se pueden llamar (tienen teléfono).
+  const llamablesFiltrados = useMemo(() => filtered.filter((c) => c.phone), [filtered]);
+  const filtrosActivos = JSON.stringify(f) !== JSON.stringify(EMPTY_FILTERS) || q.trim() !== '';
+
   // ── Selección ──
-  const pageSelected = slice.length > 0 && slice.every((c) => sel.has(c.phone));
+  const pageSelected = slice.length > 0 && slice.every((c) => !c.phone || sel.has(c.phone));
   const toggleAllPage = () => {
     const next = new Set(sel);
     if (pageSelected) slice.forEach((c) => next.delete(c.phone));
-    else slice.forEach((c) => next.add(c.phone));
+    else slice.forEach((c) => c.phone && next.add(c.phone));
     setSel(next);
   };
   const toggleOne = (phone) => {
@@ -70,6 +106,7 @@ export default function ClientesTable({ clientes, onChanged }) {
     next.has(phone) ? next.delete(phone) : next.add(phone);
     setSel(next);
   };
+  const selectAllFiltered = () => setSel(new Set(llamablesFiltrados.map((c) => c.phone)));
 
   // ── Acciones ──
   const run = async (fn, okMsg) => {
@@ -87,16 +124,20 @@ export default function ClientesTable({ clientes, onChanged }) {
     run(() => setClientesEnabled(phones, enabled),
       `${phones.length} cliente(s) ${enabled ? 'activados' : 'desactivados'}.`);
 
-  const llamar = (phones) =>
-    run(() => triggerCalls(phones, phones.length > 1 ? 'bulk' : 'manual'), (r) => {
+  const llamar = (phones) => {
+    if (phones.length > 5 && !window.confirm(
+      `Vas a lanzar ${phones.length} llamadas reales (1 por minuto, ~${phones.length} min). ¿Continuar?`
+    )) return;
+    return run(() => triggerCalls(phones, phones.length > 1 ? 'bulk' : 'manual'), (r) => {
       if (r.enSegundoPlano) {
         return `${r.encoladas} llamada(s) encoladas · 1 por minuto (~${r.duracionMin} min)` +
-          (r.truncado ? ` · se truncó a ${r.encoladas} de ${r.total} por seguridad` : '');
+          (r.truncado ? ` · truncado a ${r.encoladas} de ${r.total} por seguridad` : '');
       }
       return r.fallidas
         ? `Llamada fallida: ${(r.detalles && r.detalles[0] && r.detalles[0].error) || 'error'}`
         : '📞 Llamada lanzada.';
     });
+  };
 
   const selArr = [...sel];
   const caret = (k) => (k === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
@@ -111,28 +152,96 @@ export default function ClientesTable({ clientes, onChanged }) {
       <div className="toolbar">
         <input className="search" placeholder="Buscar por nombre, código, teléfono o email…"
           value={q} onChange={(e) => setQ(e.target.value)} />
-        <label className="user-admin-check">
-          <input type="checkbox" checked={soloHabilitados} onChange={(e) => setSoloHabilitados(e.target.checked)} />
-          Solo activos
-        </label>
+        <select className="search select" value={f.estado} onChange={(e) => setFilter('estado', e.target.value)}>
+          <option value="todos">Todos los estados</option>
+          <option value="activos">Solo activos</option>
+          <option value="inactivos">Solo inactivos</option>
+        </select>
+        <button className={`mini-btn ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters((s) => !s)}>
+          ⚙ Filtros {filtrosActivos ? '•' : ''}
+        </button>
       </div>
 
-      {/* Barra de acciones masivas */}
+      {showFilters && (
+        <div className="filters">
+          <div className="filter-presets">
+            <span className="filter-lbl">Rápidos:</span>
+            <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, vencidoMin: '100000', soloLlamables: true })}>Vencido &gt; $100k</button>
+            <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, vencidoMin: '500000', soloLlamables: true })}>Vencido &gt; $500k</button>
+            <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, pvMin: '75', soloLlamables: true })}>+75% vencido</button>
+            <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, utilMin: '100', soloLlamables: true })}>Sobre su límite</button>
+            <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, vencidoMin: '1', soloLlamables: true })}>Con vencido</button>
+            <button className="chip sm danger" onClick={() => { setF(EMPTY_FILTERS); setQ(''); }}>✕ Limpiar</button>
+          </div>
+
+          <div className="filter-grid">
+            <label className="filter-field">
+              <span>Deuda vencida (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.vencidoMin} onChange={(e) => setFilter('vencidoMin', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Deuda vencida (máx.)</span>
+              <input type="number" className="search" placeholder="∞" value={f.vencidoMax} onChange={(e) => setFilter('vencidoMax', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Deuda total (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.totalMin} onChange={(e) => setFilter('totalMin', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Deuda total (máx.)</span>
+              <input type="number" className="search" placeholder="∞" value={f.totalMax} onChange={(e) => setFilter('totalMax', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>% vencido (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.pvMin} onChange={(e) => setFilter('pvMin', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>% utilización crédito (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.utilMin} onChange={(e) => setFilter('utilMin', e.target.value)} />
+            </label>
+            <label className="filter-field check">
+              <input type="checkbox" checked={f.soloLlamables} onChange={(e) => setFilter('soloLlamables', e.target.checked)} />
+              <span>Solo con teléfono (llamables)</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Resumen del grupo filtrado + acciones sobre TODO el grupo */}
+      {filtrosActivos && (
+        <div className="group-bar">
+          <span className="group-count">
+            <strong>{num(filtered.length)}</strong> coinciden · <strong>{num(llamablesFiltrados.length)}</strong> llamables
+            {' · '}vencido del grupo: <strong>{money(filtered.reduce((s, c) => s + (c.deuda_vencida || 0), 0))}</strong>
+          </span>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length} onClick={selectAllFiltered}>
+            Seleccionar los {num(llamablesFiltrados.length)} llamables
+          </button>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
+            onClick={() => setEnabled(llamablesFiltrados.map((c) => c.phone), true)}>
+            Activar el grupo
+          </button>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
+            onClick={() => setEnabled(llamablesFiltrados.map((c) => c.phone), false)}>
+            Desactivar el grupo
+          </button>
+        </div>
+      )}
+
+      {/* Barra de acciones sobre la selección */}
       {selArr.length > 0 && (
         <div className="bulkbar">
           <span className="bulk-count">{num(selArr.length)} seleccionado(s)</span>
           <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, true)}>Activar</button>
           <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, false)}>Desactivar</button>
           <button className="btn call-btn" disabled={busy} onClick={() => llamar(selArr)}>
-            {busy ? 'Lanzando…' : `📞 Llamar a ${selArr.length}`}
+            {busy ? 'Lanzando…' : `📞 Llamar a ${num(selArr.length)}`}
           </button>
-          <button className="mini-btn" onClick={() => setSel(new Set())}>Limpiar</button>
+          <button className="mini-btn" onClick={() => setSel(new Set())}>Limpiar selección</button>
         </div>
       )}
 
-      {msg && (
-        <div className={`bulk-msg ${msg.type}`}>{msg.text}</div>
-      )}
+      {msg && <div className={`bulk-msg ${msg.type}`}>{msg.text}</div>}
 
       <Pager p={pager} />
       <div className="table-wrap">
@@ -155,7 +264,7 @@ export default function ClientesTable({ clientes, onChanged }) {
           </thead>
           <tbody>
             {slice.map((c, i) => {
-              const pv = c.deuda_total > 0 ? Math.round((c.deuda_vencida / c.deuda_total) * 100) : 0;
+              const pv = Math.round(pctVenc(c));
               return (
                 <tr key={(c.codigo || c.id || i) + '-' + i} className={sel.has(c.phone) ? 'row-sel' : ''}>
                   <td>
@@ -163,12 +272,9 @@ export default function ClientesTable({ clientes, onChanged }) {
                   </td>
                   <td>
                     {c.phone ? (
-                      <button
-                        className={`switch ${c.enabled ? 'on' : ''}`}
-                        disabled={busy}
+                      <button className={`switch ${c.enabled ? 'on' : ''}`} disabled={busy}
                         title={c.enabled ? 'Activo: entra en el cron diario' : 'Inactivo: no se llama'}
-                        onClick={() => setEnabled([c.phone], !c.enabled)}
-                      >
+                        onClick={() => setEnabled([c.phone], !c.enabled)}>
                         <span className="knob" />
                       </button>
                     ) : (
@@ -198,7 +304,7 @@ export default function ClientesTable({ clientes, onChanged }) {
               );
             })}
             {slice.length === 0 && (
-              <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Sin resultados.</td></tr>
+              <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Ningún cliente coincide con los filtros.</td></tr>
             )}
           </tbody>
         </table>

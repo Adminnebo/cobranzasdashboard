@@ -186,6 +186,29 @@ body {
 .switch:disabled { opacity: 0.5; cursor: default; }
 .no-phone { color: var(--text-muted); font-size: 0.9rem; }
 
+/* ── Panel de filtros ── */
+.filters { padding: 14px; background: var(--surface-2); border-bottom: 1px solid var(--grid); }
+.filter-presets { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; }
+.filter-lbl { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; margin-right: 2px; }
+.chip.sm { padding: 5px 11px; font-size: 0.78rem; background: var(--surface-1); }
+.chip.sm.danger { color: var(--critical); }
+.filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 10px; }
+.filter-field { display: flex; flex-direction: column; gap: 4px; }
+.filter-field > span { font-size: 0.74rem; color: var(--text-secondary); font-weight: 600; }
+.filter-field .search { min-width: 0; width: 100%; padding: 7px 10px; font-size: 0.82rem; }
+.filter-field.check { flex-direction: row; align-items: center; gap: 7px; align-self: end; padding-bottom: 8px; }
+.filter-field.check > span { font-size: 0.8rem; font-weight: 500; }
+.mini-btn.active { background: var(--series-1); color: #fff; border-color: transparent; }
+
+/* ── Barra del grupo filtrado ── */
+.group-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 11px 14px; background: color-mix(in srgb, var(--series-1) 7%, transparent);
+  border-bottom: 1px solid var(--grid);
+}
+.group-count { font-size: 0.82rem; color: var(--text-secondary); margin-right: auto; }
+.group-count strong { color: var(--text-primary); }
+
 /* ── Barra de acciones masivas ── */
 .bulkbar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
