@@ -143,8 +143,25 @@ app.post('/api/calls/trigger', async (req, res) => {
     if (!objetivo.length) return res.status(404).json({ error: 'Ningún cliente coincide con esos teléfonos' });
 
     const por = req.user ? req.user.email : null;
-    const resultado = await calls.triggerBatch(objetivo, origen === 'bulk' ? 'bulk' : 'manual', por);
-    res.json(resultado);
+    const tipo = origen === 'bulk' ? 'bulk' : 'manual';
+
+    // Una sola llamada: espera y devuelve el resultado real (es instantáneo).
+    if (objetivo.length === 1) {
+      const resultado = await calls.triggerBatch(objetivo, tipo, por);
+      return res.json(resultado);
+    }
+
+    // Varias: se encolan en segundo plano (1 por minuto -> tomaría minutos/horas).
+    // Respondemos de inmediato para no bloquear al navegador.
+    const minutos = Math.max(0, Math.min(objetivo.length, calls.MAX_BATCH) - 1) * (calls.DELAY_MS / 60000);
+    calls.triggerBatch(objetivo, tipo, por).catch((e) => console.error('[calls bulk]', e.message));
+    res.json({
+      encoladas: Math.min(objetivo.length, calls.MAX_BATCH),
+      total: objetivo.length,
+      truncado: objetivo.length > calls.MAX_BATCH,
+      duracionMin: Math.round(minutos),
+      enSegundoPlano: true,
+    });
   } catch (err) {
     console.error('[/api/calls/trigger]', err);
     res.status(500).json({ error: err.message });

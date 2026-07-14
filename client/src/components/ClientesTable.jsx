@@ -88,8 +88,15 @@ export default function ClientesTable({ clientes, onChanged }) {
       `${phones.length} cliente(s) ${enabled ? 'activados' : 'desactivados'}.`);
 
   const llamar = (phones) =>
-    run(() => triggerCalls(phones, phones.length > 1 ? 'bulk' : 'manual'),
-      (r) => `Llamadas lanzadas: ${r.lanzadas ?? phones.length}${r.fallidas ? ` · fallidas: ${r.fallidas}` : ''}`);
+    run(() => triggerCalls(phones, phones.length > 1 ? 'bulk' : 'manual'), (r) => {
+      if (r.enSegundoPlano) {
+        return `${r.encoladas} llamada(s) encoladas · 1 por minuto (~${r.duracionMin} min)` +
+          (r.truncado ? ` · se truncó a ${r.encoladas} de ${r.total} por seguridad` : '');
+      }
+      return r.fallidas
+        ? `Llamada fallida: ${(r.detalles && r.detalles[0] && r.detalles[0].error) || 'error'}`
+        : '📞 Llamada lanzada.';
+    });
 
   const selArr = [...sel];
   const caret = (k) => (k === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');

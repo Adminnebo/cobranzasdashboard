@@ -20,7 +20,9 @@ const db = require('./supabaseDb');
 const CALL_URL = process.env.N8N_CALL_URL || '';
 const CALL_METHOD = (process.env.N8N_CALL_METHOD || 'POST').toUpperCase();
 const N8N_API_KEY = process.env.N8N_API_KEY || '';
-const DELAY_MS = parseInt(process.env.CALL_DELAY_MS || '5000', 10);
+// 1 llamada por minuto por defecto: el proveedor admite máx. 10 simultáneas y
+// una llamada dura ~2-3 min, así nunca se acumulan más de ~3 a la vez.
+const DELAY_MS = parseInt(process.env.CALL_DELAY_MS || '60000', 10);
 const MAX_BATCH = parseInt(process.env.CALL_MAX_BATCH || '200', 10);
 
 const callsEnabled = !!CALL_URL;
