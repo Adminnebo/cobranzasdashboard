@@ -56,14 +56,32 @@ app.get('/api/data', async (req, res) => {
     } catch (e) {
       console.error('[cliente_config] no disponible, todos disabled:', e.message);
     }
+    // Última llamada de cada cliente (para mostrar su status en la tabla).
+    const ultimaPorTel = new Map();
+    for (const ll of llamadas) {
+      if (!ll.phone) continue;
+      const prev = ultimaPorTel.get(ll.phone);
+      if (!prev || new Date(ll.created_at) > new Date(prev.created_at)) ultimaPorTel.set(ll.phone, ll);
+    }
+
     const conFlag = clientes.map((c) => {
       const i = ivrMap.get(c.phone);
+      const ll = ultimaPorTel.get(c.phone);
       return {
         ...c,
         enabled: enabledMap.get(c.phone) === true,
         ivr: !!i,
         ivrDetalle: i ? i.detalle : null,
         ivrAt: i ? i.at : null,
+        ultimaLlamada: ll
+          ? {
+              fecha: ll.created_at,
+              intencion: ll.intencion_pago,
+              fechaPago: ll.fecha_pago || null,
+              notas: ll.notas || null,
+              grabacion: ll.grabacion || null,
+            }
+          : null,
       };
     });
 

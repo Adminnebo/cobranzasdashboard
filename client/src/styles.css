@@ -185,6 +185,9 @@ body {
 .switch.on .knob { transform: translateX(17px); background: #fff; }
 .switch:disabled { opacity: 0.5; cursor: default; }
 .no-phone { color: var(--text-muted); font-size: 0.9rem; }
+.ult-llamada { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.ult-meta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.ult-meta strong { color: var(--text-secondary); }
 .ivr-badge {
   display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
   font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 999px;

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
+import { INTENCION, intencionColor, intencionLabel } from '../constants';
 import { setClientesEnabled, triggerCalls, resetIvr } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
@@ -13,16 +14,25 @@ const sortValue = {
   deuda_vencida: (c) => c.deuda_vencida || 0,
   pv: (c) => (c.deuda_total > 0 ? c.deuda_vencida / c.deuda_total : 0),
   util: (c) => (c.credito_ofrecido > 0 ? c.deuda_total / c.credito_ofrecido : 0),
+  // Última llamada: los nunca llamados van al final.
+  ultima: (c) => (c.ultimaLlamada ? new Date(c.ultimaLlamada.fecha).getTime() : 0),
 };
 const TEXT_COLS = new Set(['name']);
 
 const EMPTY_FILTERS = {
   estado: 'todos',        // todos | activos | inactivos | ivr | sin_ivr
+  intencion: '',          // intención de la última llamada ('' = todas)
   vencidoMin: '', vencidoMax: '',
   totalMin: '', totalMax: '',
   pvMin: '',              // % vencido mínimo
   utilMin: '',            // % utilización de crédito mínimo
   soloLlamables: false,   // con teléfono
+};
+
+const fmtFecha = (iso) => {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }); }
+  catch { return ''; }
 };
 
 const pctVenc = (c) => (c.deuda_total > 0 ? (c.deuda_vencida / c.deuda_total) * 100 : 0);
@@ -60,6 +70,11 @@ export default function ClientesTable({ clientes, onChanged }) {
       if (f.estado === 'ivr' && !c.ivr) return false;
       if (f.estado === 'sin_ivr' && c.ivr) return false;
       if (f.soloLlamables && (!c.phone || c.ivr)) return false;
+
+      if (f.intencion) {
+        const int = c.ultimaLlamada ? c.ultimaLlamada.intencion : 'no_contactado';
+        if (int !== f.intencion) return false;
+      }
 
       const venc = c.deuda_vencida || 0;
       const tot = c.deuda_total || 0;
@@ -175,6 +190,13 @@ export default function ClientesTable({ clientes, onChanged }) {
           <option value="ivr">Solo IVR / contestadora</option>
           <option value="sin_ivr">Excluir IVR</option>
         </select>
+        <select className="search select" value={f.intencion} onChange={(e) => setFilter('intencion', e.target.value)}>
+          <option value="">Cualquier última llamada</option>
+          <option value="no_contactado">Nunca llamados</option>
+          {Object.entries(INTENCION).filter(([k]) => k !== 'no_contactado').map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
         <button className={`mini-btn ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters((s) => !s)}>
           ⚙ Filtros {filtrosActivos ? '•' : ''}
         </button>
@@ -279,6 +301,7 @@ export default function ClientesTable({ clientes, onChanged }) {
               <Th k="deuda_total" cls="num">Deuda total</Th>
               <Th k="deuda_vencida" cls="num">Vencida</Th>
               <Th k="pv" cls="num">% venc.</Th>
+              <Th k="ultima">Última llamada</Th>
               <th>Acción</th>
             </tr>
           </thead>
@@ -320,6 +343,22 @@ export default function ClientesTable({ clientes, onChanged }) {
                   </td>
                   <td className="num" style={{ color: pv > 75 ? 'var(--critical)' : pv > 25 ? 'var(--serious)' : 'var(--text-secondary)' }}>{pv}%</td>
                   <td>
+                    {c.ultimaLlamada ? (
+                      <div className="ult-llamada" title={c.ultimaLlamada.notas || ''}>
+                        <span className="pill" style={{ color: intencionColor(c.ultimaLlamada.intencion) }}>
+                          <span className="pdot" style={{ background: intencionColor(c.ultimaLlamada.intencion) }} />
+                          {intencionLabel(c.ultimaLlamada.intencion)}
+                        </span>
+                        <span className="ult-meta">
+                          {fmtFecha(c.ultimaLlamada.fecha)}
+                          {c.ultimaLlamada.fechaPago && <> · promete: <strong>{c.ultimaLlamada.fechaPago}</strong></>}
+                        </span>
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Nunca llamado</span>
+                    )}
+                  </td>
+                  <td>
                     {c.ivr ? (
                       <button className="mini-btn" disabled={busy}
                         title="Quita la marca de IVR y permite volver a llamarlo (útil si consiguieron otro número)"
@@ -336,7 +375,7 @@ export default function ClientesTable({ clientes, onChanged }) {
               );
             })}
             {slice.length === 0 && (
-              <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Ningún cliente coincide con los filtros.</td></tr>
+              <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Ningún cliente coincide con los filtros.</td></tr>
             )}
           </tbody>
         </table>
