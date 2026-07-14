@@ -185,6 +185,12 @@ body {
 .switch.on .knob { transform: translateX(17px); background: #fff; }
 .switch:disabled { opacity: 0.5; cursor: default; }
 .no-phone { color: var(--text-muted); font-size: 0.9rem; }
+.ivr-badge {
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); cursor: help;
+}
 
 /* ── Panel de la cola de llamadas ── */
 .queue-panel {

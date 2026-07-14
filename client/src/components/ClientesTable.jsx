@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
-import { setClientesEnabled, triggerCalls } from '../api';
+import { setClientesEnabled, triggerCalls, resetIvr } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 
@@ -17,7 +17,7 @@ const sortValue = {
 const TEXT_COLS = new Set(['name']);
 
 const EMPTY_FILTERS = {
-  estado: 'todos',        // todos | activos | inactivos
+  estado: 'todos',        // todos | activos | inactivos | ivr | sin_ivr
   vencidoMin: '', vencidoMax: '',
   totalMin: '', totalMax: '',
   pvMin: '',              // % vencido mínimo
@@ -57,7 +57,9 @@ export default function ClientesTable({ clientes, onChanged }) {
     return clientes.filter((c) => {
       if (f.estado === 'activos' && !c.enabled) return false;
       if (f.estado === 'inactivos' && c.enabled) return false;
-      if (f.soloLlamables && !c.phone) return false;
+      if (f.estado === 'ivr' && !c.ivr) return false;
+      if (f.estado === 'sin_ivr' && c.ivr) return false;
+      if (f.soloLlamables && (!c.phone || c.ivr)) return false;
 
       const venc = c.deuda_vencida || 0;
       const tot = c.deuda_total || 0;
@@ -90,16 +92,18 @@ export default function ClientesTable({ clientes, onChanged }) {
 
   const { slice, start, pager } = usePaged(sorted, 25);
 
-  // Solo los que se pueden llamar (tienen teléfono).
-  const llamablesFiltrados = useMemo(() => filtered.filter((c) => c.phone), [filtered]);
+  // Llamables = con teléfono y NO marcados como IVR.
+  const llamablesFiltrados = useMemo(() => filtered.filter((c) => c.phone && !c.ivr), [filtered]);
+  const ivrEnGrupo = useMemo(() => filtered.filter((c) => c.ivr).length, [filtered]);
   const filtrosActivos = JSON.stringify(f) !== JSON.stringify(EMPTY_FILTERS) || q.trim() !== '';
 
   // ── Selección ──
-  const pageSelected = slice.length > 0 && slice.every((c) => !c.phone || sel.has(c.phone));
+  const selectable = (c) => c.phone && !c.ivr;
+  const pageSelected = slice.length > 0 && slice.every((c) => !selectable(c) || sel.has(c.phone));
   const toggleAllPage = () => {
     const next = new Set(sel);
     if (pageSelected) slice.forEach((c) => next.delete(c.phone));
-    else slice.forEach((c) => c.phone && next.add(c.phone));
+    else slice.forEach((c) => selectable(c) && next.add(c.phone));
     setSel(next);
   };
   const toggleOne = (phone) => {
@@ -168,6 +172,8 @@ export default function ClientesTable({ clientes, onChanged }) {
           <option value="todos">Todos los estados</option>
           <option value="activos">Solo activos</option>
           <option value="inactivos">Solo inactivos</option>
+          <option value="ivr">Solo IVR / contestadora</option>
+          <option value="sin_ivr">Excluir IVR</option>
         </select>
         <button className={`mini-btn ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters((s) => !s)}>
           ⚙ Filtros {filtrosActivos ? '•' : ''}
@@ -183,6 +189,7 @@ export default function ClientesTable({ clientes, onChanged }) {
             <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, pvMin: '75', soloLlamables: true })}>+75% vencido</button>
             <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, utilMin: '100', soloLlamables: true })}>Sobre su límite</button>
             <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, vencidoMin: '1', soloLlamables: true })}>Con vencido</button>
+            <button className="chip sm" onClick={() => setF({ ...EMPTY_FILTERS, estado: 'ivr' })}>☎ Solo IVR</button>
             <button className="chip sm danger" onClick={() => { setF(EMPTY_FILTERS); setQ(''); }}>✕ Limpiar</button>
           </div>
 
@@ -224,6 +231,7 @@ export default function ClientesTable({ clientes, onChanged }) {
         <div className="group-bar">
           <span className="group-count">
             <strong>{num(filtered.length)}</strong> coinciden · <strong>{num(llamablesFiltrados.length)}</strong> llamables
+            {ivrEnGrupo > 0 && <> · <span style={{ color: 'var(--warning)' }}>{num(ivrEnGrupo)} IVR excluidos</span></>}
             {' · '}vencido del grupo: <strong>{money(filtered.reduce((s, c) => s + (c.deuda_vencida || 0), 0))}</strong>
           </span>
           <button className="mini-btn" disabled={busy || !llamablesFiltrados.length} onClick={selectAllFiltered}>
@@ -280,10 +288,14 @@ export default function ClientesTable({ clientes, onChanged }) {
               return (
                 <tr key={(c.codigo || c.id || i) + '-' + i} className={sel.has(c.phone) ? 'row-sel' : ''}>
                   <td>
-                    <input type="checkbox" disabled={!c.phone} checked={sel.has(c.phone)} onChange={() => toggleOne(c.phone)} />
+                    <input type="checkbox" disabled={!selectable(c)} checked={sel.has(c.phone)} onChange={() => toggleOne(c.phone)} />
                   </td>
                   <td>
-                    {c.phone ? (
+                    {c.ivr ? (
+                      <span className="ivr-badge" title={c.ivrDetalle || 'La llamada cayó en un IVR/contestadora'}>
+                        ☎ IVR
+                      </span>
+                    ) : c.phone ? (
                       <button className={`switch ${c.enabled ? 'on' : ''}`} disabled={busy}
                         title={c.enabled ? 'Activo: entra en el cron diario' : 'Inactivo: no se llama'}
                         onClick={() => setEnabled([c.phone], !c.enabled)}>
@@ -308,9 +320,17 @@ export default function ClientesTable({ clientes, onChanged }) {
                   </td>
                   <td className="num" style={{ color: pv > 75 ? 'var(--critical)' : pv > 25 ? 'var(--serious)' : 'var(--text-secondary)' }}>{pv}%</td>
                   <td>
-                    <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
-                      📞 Llamar ahora
-                    </button>
+                    {c.ivr ? (
+                      <button className="mini-btn" disabled={busy}
+                        title="Quita la marca de IVR y permite volver a llamarlo (útil si consiguieron otro número)"
+                        onClick={() => run(() => resetIvr(c.phone), 'Marca de IVR quitada. Ya se puede volver a llamar.')}>
+                        ↺ Reactivar
+                      </button>
+                    ) : (
+                      <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
+                        📞 Llamar ahora
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

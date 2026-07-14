@@ -8,6 +8,7 @@ export const INTENCION = {
   no_contesta:      { label: 'No contesta',      color: 'var(--q-5)' },
   disputa:          { label: 'Disputa',          color: 'var(--q-6)' },
   sin_intencion:    { label: 'Sin intención',    color: 'var(--q-7)' },
+  ivr:              { label: 'IVR / contestadora', color: 'var(--q-8)' },
   no_contactado:    { label: 'No contactado',    color: 'var(--q-8)' },
 };
 

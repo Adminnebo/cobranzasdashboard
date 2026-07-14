@@ -56,6 +56,7 @@ export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enab
 export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trigger', { phones, origen });
 export const fetchQueue = () => get('/api/calls/queue');
 export const cancelQueue = () => del('/api/calls/queue');
+export const resetIvr = (phone) => post(`/api/clientes/${phone}/ivr/reset`, {});
 
 // ── Auth / usuarios ──
 export const fetchMe = () => get('/api/me');

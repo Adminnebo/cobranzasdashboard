@@ -16,6 +16,7 @@
 
 const db = require('./supabaseDb');
 const calls = require('./calls');
+const ivr = require('./ivr');
 
 const TABLE = 'llamada_cola';
 const TZ = process.env.CRON_TZ || 'America/Santo_Domingo';
@@ -45,8 +46,16 @@ function dentroDeHorario(d = new Date()) {
  * @returns { encoladas, yaEnCola, totalPendientes }
  */
 async function enqueue(clientes, origen = 'bulk', por = null, agente = 'principal') {
-  const llamables = clientes.filter((c) => c.phone);
-  if (!llamables.length) return { encoladas: 0, yaEnCola: 0, totalPendientes: await countPendientes() };
+  const conTel = clientes.filter((c) => c.phone);
+
+  // Los que cayeron en IVR NUNCA se encolan (da igual el origen: cron, manual o masivo).
+  const ivrPhones = await ivr.getIvrPhones();
+  const llamables = conTel.filter((c) => !ivrPhones.has(c.phone));
+  const omitidosIvr = conTel.length - llamables.length;
+
+  if (!llamables.length) {
+    return { encoladas: 0, yaEnCola: 0, omitidosIvr, totalPendientes: await countPendientes() };
+  }
 
   const pendientes = await db.select(TABLE, '?select=phone&estado=eq.pendiente');
   const yaEstan = new Set((pendientes || []).map((r) => String(r.phone)));
@@ -74,8 +83,8 @@ async function enqueue(clientes, origen = 'bulk', por = null, agente = 'principa
   }
 
   const totalPendientes = await countPendientes();
-  console.log(`[cola] +${nuevos.length} encoladas (${yaEnCola} ya estaban) · pendientes: ${totalPendientes}`);
-  return { encoladas: nuevos.length, yaEnCola, totalPendientes };
+  console.log(`[cola] +${nuevos.length} encoladas (${yaEnCola} ya estaban${omitidosIvr ? `, ${omitidosIvr} omitidos por IVR` : ''}) · pendientes: ${totalPendientes}`);
+  return { encoladas: nuevos.length, yaEnCola, omitidosIvr, totalPendientes };
 }
 
 async function countPendientes() {

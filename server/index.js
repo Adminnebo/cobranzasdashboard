@@ -12,6 +12,7 @@ const { ask } = require('./services/ask');
 const { requireAuth, requireAdmin, publicConfig, authEnabled } = require('./services/auth');
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
+const ivr = require('./services/ivr');
 const calls = require('./services/calls');
 const queue = require('./services/queue');
 const promesas = require('./services/promesas');
@@ -49,12 +50,22 @@ app.get('/api/data', async (req, res) => {
     const { clientes, llamadas, source, cachedAt, cacheAgeMs } = await getCachedData();
 
     let enabledMap = new Map();
+    let ivrMap = new Map();
     try {
-      enabledMap = await clienteConfig.getEnabledMap();
+      [enabledMap, ivrMap] = await Promise.all([clienteConfig.getEnabledMap(), ivr.getIvrMap()]);
     } catch (e) {
       console.error('[cliente_config] no disponible, todos disabled:', e.message);
     }
-    const conFlag = clientes.map((c) => ({ ...c, enabled: enabledMap.get(c.phone) === true }));
+    const conFlag = clientes.map((c) => {
+      const i = ivrMap.get(c.phone);
+      return {
+        ...c,
+        enabled: enabledMap.get(c.phone) === true,
+        ivr: !!i,
+        ivrDetalle: i ? i.detalle : null,
+        ivrAt: i ? i.at : null,
+      };
+    });
 
     const metrics = computeMetrics(conFlag, llamadas);
     res.json({ source, clientes: conFlag, llamadas, metrics, cachedAt, cacheAgeMs });
@@ -146,14 +157,22 @@ app.post('/api/calls/trigger', async (req, res) => {
 
     const por = req.user ? req.user.email : null;
 
-    // Una sola: se dispara al momento (no espera turno en la cola).
-    if (objetivo.length === 1) {
-      const r = await calls.triggerBatch(objetivo, 'manual', por);
-      return res.json({ ...r, inmediata: true });
+    // Los marcados como IVR no se llaman nunca (ni siquiera a mano).
+    const ivrPhones = await ivr.getIvrPhones();
+    const permitidos = objetivo.filter((c) => !ivrPhones.has(c.phone));
+    const omitidosIvr = objetivo.length - permitidos.length;
+    if (!permitidos.length) {
+      return res.status(409).json({ error: `Omitido: ${omitidosIvr} cliente(s) están marcados como IVR y no se llaman.` });
     }
 
-    // Varias: a la cola persistente.
-    const r = await queue.enqueue(objetivo, origen === 'cron' ? 'cron' : 'bulk', por);
+    // Una sola: se dispara al momento (no espera turno en la cola).
+    if (permitidos.length === 1) {
+      const r = await calls.triggerBatch(permitidos, 'manual', por);
+      return res.json({ ...r, inmediata: true, omitidosIvr });
+    }
+
+    // Varias: a la cola persistente (enqueue vuelve a filtrar IVR por seguridad).
+    const r = await queue.enqueue(permitidos, origen === 'cron' ? 'cron' : 'bulk', por);
     const st = await queue.status();
     res.json({ ...r, encolado: true, enHorario: st.enHorario, horario: st.horario, minutosEstimados: st.minutosEstimados });
   } catch (err) {
@@ -166,6 +185,20 @@ app.post('/api/calls/trigger', async (req, res) => {
 app.get('/api/calls/queue', async (req, res) => {
   try { res.json(await queue.status()); }
   catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Quita la marca de IVR (para reactivar a un cliente si consiguen otro número).
+app.post('/api/clientes/:phone/ivr/reset', async (req, res) => {
+  try { res.json(await ivr.desmarcar(req.params.phone)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Fuerza la detección de IVR ahora (sin esperar al cron).
+app.post('/api/ivr/revisar', async (req, res) => {
+  try {
+    const { llamadas } = await getCachedData(true);
+    res.json(await ivr.sincronizar(llamadas));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Promesas de pago: resumen (pendientes / cumplidas / incumplidas).
@@ -268,6 +301,10 @@ app.listen(PORT, async () => {
   // Worker de la cola: cada minuto saca UNA llamada (si está en horario).
   cron.schedule('* * * * *', () => queue.tick().catch((e) => console.error('[cola tick]', e.message)), opts);
 
+  // IVR: cada 10 min revisa las llamadas nuevas y desactiva a los que cayeron
+  // en contestadora (para que el cron de las 10 ya no los tome).
+  cron.schedule('*/10 * * * *', () => revisarIvr().catch((e) => console.error('[cron ivr]', e.message)), opts);
+
   // Promesas: cada día a las 9:30 (antes del cron de las 10) detecta promesas
   // nuevas y encola al SUB-AGENTE a quienes prometieron y no pagaron.
   const PROMESA_CRON = process.env.PROMESA_CRON || '30 9 * * *';
@@ -279,6 +316,12 @@ app.listen(PORT, async () => {
   console.log(`  Cron diario (encola habilitados): ${CALL_CRON} (${history.TZ})`);
   console.log(`  Cola: 1 llamada/min · horario ${st ? st.horario : '9:00–18:00 (L–V)'}${st ? ` · pendientes: ${st.pendientes}` : ''}\n`);
 });
+
+// Marca como IVR (y desactiva) a los clientes cuyas llamadas cayeron en contestadora.
+async function revisarIvr() {
+  const { llamadas } = await getCachedData();
+  return ivr.sincronizar(llamadas);
+}
 
 // Promesas de pago: (1) detecta promesas nuevas en las llamadas, (2) revisa las
 // vencidas y encola al sub-agente a quien prometió y sigue debiendo.
@@ -295,6 +338,9 @@ async function encolarHabilitados() {
     console.log('[cron llamadas] omitido: falta N8N_CALL_URL');
     return;
   }
+  // Antes de encolar, desactiva a los que cayeron en IVR desde la última revisión.
+  await revisarIvr().catch((e) => console.error('[ivr pre-cron]', e.message));
+
   const phones = await clienteConfig.getEnabledPhones();
   if (!phones.length) {
     console.log('[cron llamadas] no hay clientes habilitados.');
