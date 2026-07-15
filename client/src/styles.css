@@ -372,15 +372,21 @@ tbody tr:hover { background: var(--surface-2); }
 /* ── Detalle de llamada (audio + transcripción) ── */
 .call-row.open { background: var(--surface-2); }
 .call-row.open td { border-bottom: none; }
-.call-detail-row td { background: var(--surface-2); padding: 0; }
-.call-detail { padding: 16px 18px 20px; border-bottom: 1px solid var(--grid); }
+.call-detail-row td { background: var(--surface-2); padding: 0; white-space: normal; }
+/* El detalle se ancla a la izquierda del área visible aunque la tabla scrollee,
+   y su ancho se limita al viewport para que la transcripción no se corte. */
+.call-detail {
+  position: sticky; left: 0; box-sizing: border-box;
+  width: min(100%, calc(100vw - 5rem)); max-width: 1100px;
+  padding: 16px 18px 20px; border-bottom: 1px solid var(--grid);
+}
 .call-audio { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
-.call-audio audio { flex: 1; min-width: 240px; height: 40px; }
+.call-audio audio { flex: 1; min-width: 240px; max-width: 640px; height: 40px; }
 .call-notes { font-size: 0.86rem; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.5; }
 .cd-label { display: block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 7px; }
 .call-notes .cd-label { margin-top: 2px; }
 .transcript { display: flex; flex-direction: column; gap: 7px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
-.tr-line { max-width: 78%; padding: 8px 12px; border-radius: 12px; font-size: 0.85rem; line-height: 1.45; }
+.tr-line { max-width: 78%; padding: 8px 12px; border-radius: 12px; font-size: 0.85rem; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
 .tr-line .tr-who { display: block; font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.65; margin-bottom: 2px; }
 .tr-line.agent { align-self: flex-start; background: var(--surface-1); border: 1px solid var(--border); color: var(--text-primary); border-radius: 12px 12px 12px 4px; }
 .tr-line.user { align-self: flex-end; background: var(--series-1); color: #fff; border-radius: 12px 12px 4px 12px; }
