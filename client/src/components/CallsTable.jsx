@@ -124,7 +124,7 @@ export default function CallsTable({ llamadas }) {
                         <div className="call-detail">
                           {ll.grabacion ? (
                             <div className="call-audio">
-                              <audio controls preload="none" src={ll.grabacion} style={{ width: '100%' }}>
+                              <audio controls preload="metadata" src={`/api/recordings/proxy?url=${encodeURIComponent(ll.grabacion)}`} style={{ width: '100%' }}>
                                 Tu navegador no soporta audio. <a href={ll.grabacion} target="_blank" rel="noreferrer">Descargar</a>
                               </audio>
                               <a className="a-link" href={ll.grabacion} target="_blank" rel="noreferrer" style={{ fontSize: '0.76rem' }}>Abrir en pestaña ↗</a>

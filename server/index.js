@@ -40,6 +40,11 @@ app.get('/api/health', (req, res) => {
 // Config pública para inicializar Supabase en el frontend (no expone secretos).
 app.get('/api/config', (req, res) => res.json(publicConfig()));
 
+// Proxy de grabaciones (público: el <audio> no puede mandar token). Con
+// allowlist de hosts. Re-sirve el WAV con Content-Length + Range para que el
+// reproductor inline funcione.
+app.get('/api/recordings/proxy', require('./services/recordingProxy').handle);
+
 // A partir de aquí, todas las rutas /api requieren sesión (si la auth está activada).
 app.use('/api', requireAuth);
 
