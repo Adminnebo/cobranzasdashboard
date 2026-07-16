@@ -488,6 +488,7 @@ tbody tr:hover { background: var(--surface-2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Asistente IA ── */
+.asst-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .chip {
   font: inherit; font-size: 0.82rem; cursor: pointer; text-align: left;

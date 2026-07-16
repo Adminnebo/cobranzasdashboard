@@ -9,6 +9,7 @@ const { getCachedData, cacheInfo } = require('./services/cache');
 const { computeMetrics } = require('./services/metrics');
 const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
+const chatStore = require('./services/chatStore');
 const { requireAuth, requireAdmin, publicConfig, authEnabled } = require('./services/auth');
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
@@ -141,11 +142,28 @@ app.post('/api/ask', async (req, res) => {
     if (!question) return res.status(400).json({ error: 'Falta la pregunta.' });
     if (question.length > 2000) return res.status(400).json({ error: 'Pregunta demasiado larga.' });
     const result = await ask(question);
+    // Persistir el intercambio en el chat del usuario.
+    if (req.user && result.answer && !result.noKey) {
+      chatStore.append(req.user.email, question, result.answer, {
+        model: result.model, usage: result.usage, costUsd: result.costUsd,
+      }).catch(() => {});
+    }
     res.json(result);
   } catch (err) {
     console.error('[/api/ask]', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Historial del chat del Asistente (por usuario).
+app.get('/api/ask/history', async (req, res) => {
+  try { res.json({ thread: await chatStore.getThread(req.user && req.user.email) }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/ask/history', async (req, res) => {
+  try { await chatStore.clear(req.user && req.user.email); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Historial de deuda por día (agregado desde Supabase).

@@ -63,6 +63,8 @@ async function put(path, payload) {
 }
 
 export const askAI = (question) => post('/api/ask', { question });
+export const fetchChatHistory = () => get('/api/ask/history');
+export const clearChatHistory = () => del('/api/ask/history');
 
 // ── Llamadas ──
 export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enabled', { phones, enabled });

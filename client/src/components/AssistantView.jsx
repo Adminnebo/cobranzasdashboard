@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { askAI } from '../api';
+import { useEffect, useRef, useState } from 'react';
+import { askAI, fetchChatHistory, clearChatHistory } from '../api';
 import { renderMd } from '../md';
 
 const EJEMPLOS = [
@@ -17,6 +17,19 @@ export default function AssistantView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const endRef = useRef(null);
+
+  // Cargar el chat guardado al entrar.
+  useEffect(() => {
+    fetchChatHistory()
+      .then((r) => setThread((r.thread || []).map((m) => ({ q: m.q, a: m.a, meta: m.meta }))))
+      .catch(() => {});
+  }, []);
+
+  const limpiar = async () => {
+    if (!window.confirm('¿Borrar el historial del chat?')) return;
+    setThread([]);
+    try { await clearChatHistory(); } catch (e) {}
+  };
 
   const send = async (question) => {
     const text = (question ?? q).trim();
@@ -44,7 +57,12 @@ export default function AssistantView() {
 
   return (
     <div>
-      <div className="section-title" style={{ marginTop: 8 }}>Asistente IA · pregunta o proyecta sobre tu cartera</div>
+      <div className="asst-head">
+        <div className="section-title" style={{ margin: '8px 0' }}>Asistente IA · pregunta o proyecta sobre tu cartera</div>
+        {thread.length > 0 && (
+          <button className="mini-btn danger" onClick={limpiar}>🗑 Limpiar chat</button>
+        )}
+      </div>
 
       {thread.length === 0 && (
         <div className="card" style={{ marginBottom: 14 }}>
