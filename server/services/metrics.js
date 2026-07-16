@@ -8,6 +8,7 @@ const INTENCION_LABELS = {
   pago_inmediato: 'Pago inmediato',
   fecha_especifica: 'Fecha específica',
   negociacion: 'Negociación / plan',
+  proximo_corte: 'Próximo corte',
   promesa_vaga: 'Promesa vaga',
   disputa: 'Disputa',
   sin_intencion: 'Sin intención',
@@ -15,7 +16,7 @@ const INTENCION_LABELS = {
 };
 
 // Intenciones que cuentan como "compromiso de pago" para la tasa correspondiente.
-const INTENCION_CON_COMPROMISO = new Set(['pago_inmediato', 'fecha_especifica', 'negociacion']);
+const INTENCION_CON_COMPROMISO = new Set(['pago_inmediato', 'fecha_especifica', 'negociacion', 'proximo_corte']);
 
 const round2 = (n) => Math.round(n * 100) / 100;
 

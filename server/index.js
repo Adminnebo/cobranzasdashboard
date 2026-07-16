@@ -15,6 +15,7 @@ const clienteConfig = require('./services/clienteConfig');
 const ivr = require('./services/ivr');
 const calls = require('./services/calls');
 const queue = require('./services/queue');
+const schedule = require('./services/schedule');
 const promesas = require('./services/promesas');
 const history = require('./services/history');
 
@@ -84,6 +85,7 @@ app.get('/api/data', async (req, res) => {
               intencion: ll.intencion_pago,
               fechaPago: ll.fecha_pago || null,
               notas: ll.notas || null,
+              transcripcion: ll.transcripcion || null,
               grabacion: ll.grabacion || null,
             }
           : null,
@@ -210,6 +212,34 @@ app.get('/api/calls/queue', async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Horario de llamadas (bloques) — configurado desde la UI.
+app.get('/api/calls/schedule', async (req, res) => {
+  try { res.json(await schedule.get(true)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/calls/schedule', async (req, res) => {
+  try {
+    const { enabled, weekdaysOnly, autoEnqueue, blocks } = req.body || {};
+    const cfg = await schedule.set(
+      { enabled: !!enabled, weekdaysOnly: !!weekdaysOnly, autoEnqueue: !!autoEnqueue, blocks },
+      req.user ? req.user.email : null
+    );
+    res.json(cfg);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Encola manualmente a los clientes activos ahora (sin esperar al bloque).
+app.post('/api/calls/enqueue-enabled', async (req, res) => {
+  try {
+    if (!calls.callsEnabled) return res.status(503).json({ error: 'Llamadas no configuradas (falta N8N_CALL_URL)' });
+    const n = await queue.autoEnqueueEnabled();
+    res.json({ encoladas: n });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Quita la marca de IVR (para reactivar a un cliente si consiguen otro número).
 app.post('/api/clientes/:phone/ivr/reset', async (req, res) => {
   try { res.json(await ivr.desmarcar(req.params.phone)); }
@@ -317,11 +347,9 @@ app.listen(PORT, async () => {
   cron.schedule('0 16 * * *', () => history.takeSnapshot('PM').catch((e) => console.error('[cron PM]', e.message)), opts);
   console.log(`  Tomas programadas: 04:00 y 16:00 (${history.TZ})`);
 
-  // Cron diario: a las 10:00 ENCOLA a todos los clientes habilitados.
-  const CALL_CRON = process.env.CALL_CRON || '0 10 * * *';
-  cron.schedule(CALL_CRON, () => encolarHabilitados().catch((e) => console.error('[cron llamadas]', e.message)), opts);
-
-  // Worker de la cola: cada minuto saca UNA llamada (si está en horario).
+  // Worker de la cola: cada minuto saca UNA llamada (si estamos dentro de un
+  // bloque del horario configurado en la UI). También auto-encola a los activos
+  // 1x/día al entrar al primer bloque.
   cron.schedule('* * * * *', () => queue.tick().catch((e) => console.error('[cola tick]', e.message)), opts);
 
   // IVR: cada 10 min revisa las llamadas nuevas y desactiva a los que cayeron
@@ -336,8 +364,7 @@ app.listen(PORT, async () => {
 
   const st = await queue.status().catch(() => null);
   console.log(`  Llamadas: ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}`);
-  console.log(`  Cron diario (encola habilitados): ${CALL_CRON} (${history.TZ})`);
-  console.log(`  Cola: 1 llamada/min · horario ${st ? st.horario : '9:00–18:00 (L–V)'}${st ? ` · pendientes: ${st.pendientes}` : ''}\n`);
+  console.log(`  Horario (configurable en la UI): ${st ? (st.scheduleEnabled ? st.horario : 'DESACTIVADO') : 'n/d'}${st ? ` · pendientes: ${st.pendientes}` : ''}\n`);
 });
 
 // Marca como IVR (y desactiva) a los clientes cuyas llamadas cayeron en contestadora.
@@ -355,23 +382,3 @@ async function revisarPromesas() {
   return { ...sync, ...rev };
 }
 
-// Encola a todos los clientes habilitados (el worker los irá llamando 1/min).
-async function encolarHabilitados() {
-  if (!calls.callsEnabled) {
-    console.log('[cron llamadas] omitido: falta N8N_CALL_URL');
-    return;
-  }
-  // Antes de encolar, desactiva a los que cayeron en IVR desde la última revisión.
-  await revisarIvr().catch((e) => console.error('[ivr pre-cron]', e.message));
-
-  const phones = await clienteConfig.getEnabledPhones();
-  if (!phones.length) {
-    console.log('[cron llamadas] no hay clientes habilitados.');
-    return;
-  }
-  const { clientes } = await getCachedData(true);
-  const byPhone = new Map(clientes.map((c) => [c.phone, c]));
-  const objetivo = phones.map((p) => byPhone.get(p)).filter((c) => c && c.phone);
-  const r = await queue.enqueue(objetivo, 'cron', null);
-  console.log(`[cron llamadas] ${r.encoladas} encoladas (${r.yaEnCola} ya estaban) · pendientes: ${r.totalPendientes}`);
-}

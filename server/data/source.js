@@ -41,7 +41,7 @@ const phoneKey = (v) => String(v || '').replace(/\D/g, '').slice(-10);
 // Normaliza intencion_pago a una de las 7 categorías canónicas, tolerando
 // acentos, mayúsculas, espacios y sinónimos comunes del agente.
 const INTENCION_CANON = new Set([
-  'pago_inmediato', 'fecha_especifica', 'negociacion', 'promesa_vaga', 'disputa', 'sin_intencion', 'no_contesta',
+  'pago_inmediato', 'fecha_especifica', 'negociacion', 'proximo_corte', 'promesa_vaga', 'disputa', 'sin_intencion', 'no_contesta',
 ]);
 const INTENCION_SINONIMOS = {
   pago_hoy: 'pago_inmediato', paga_hoy: 'pago_inmediato', inmediato: 'pago_inmediato',

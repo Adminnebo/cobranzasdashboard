@@ -17,27 +17,16 @@
 const db = require('./supabaseDb');
 const calls = require('./calls');
 const ivr = require('./ivr');
+const schedule = require('./schedule');
+const clienteConfig = require('./clienteConfig');
+const { getCachedData } = require('./cache');
 
 const TABLE = 'llamada_cola';
 const TZ = process.env.CRON_TZ || 'America/Santo_Domingo';
-const HOUR_START = parseInt(process.env.CALL_HOURS_START || '9', 10);
-const HOUR_END = parseInt(process.env.CALL_HOURS_END || '18', 10);
-const WEEKDAYS_ONLY = (process.env.CALL_WEEKDAYS_ONLY || 'true') !== 'false';
 
-// ── Ventana horaria ──────────────────────────────────────────────────────────
-function partsInTz(d = new Date()) {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ, hour: '2-digit', hour12: false, weekday: 'short',
-  }).formatToParts(d);
-  const hour = parseInt(fmt.find((p) => p.type === 'hour').value, 10) % 24;
-  const weekday = fmt.find((p) => p.type === 'weekday').value; // Mon, Tue...
-  return { hour, weekday };
-}
-
-function dentroDeHorario(d = new Date()) {
-  const { hour, weekday } = partsInTz(d);
-  if (WEEKDAYS_ONLY && (weekday === 'Sat' || weekday === 'Sun')) return false;
-  return hour >= HOUR_START && hour < HOUR_END;
+function horarioTexto(cfg) {
+  const bloques = (cfg.blocks || []).map((b) => `${b.start}–${b.end}`).join(', ') || '—';
+  return `${bloques}${cfg.weekdaysOnly ? ' · L–V' : ''} (${cfg.tz || TZ})`;
 }
 
 // ── Encolar ──────────────────────────────────────────────────────────────────
@@ -95,13 +84,33 @@ async function countPendientes() {
 // ── Worker: saca UNA de la cola y la dispara ─────────────────────────────────
 let corriendo = false;
 
+// Auto-encola a los clientes activos una vez por día, al entrar al primer bloque.
+async function autoEnqueueEnabled() {
+  const phones = await clienteConfig.getEnabledPhones();
+  if (!phones.length) return 0;
+  const { clientes } = await getCachedData(true);
+  const byPhone = new Map(clientes.map((c) => [c.phone, c]));
+  const objetivo = phones.map((p) => byPhone.get(p)).filter((c) => c && c.phone);
+  const r = await enqueue(objetivo, 'cron', null, 'principal');
+  console.log(`[cola] auto-encolado diario: ${r.encoladas} activos`);
+  return r.encoladas;
+}
+
 async function tick() {
   if (corriendo) return;                       // evita solapamiento
   if (!calls.callsEnabled) return;             // sin N8N_CALL_URL no hace nada
-  if (!dentroDeHorario()) return;              // fuera de la ventana: pausa
+
+  const cfg = await schedule.get();
+  if (!schedule.inWindow(cfg)) return;         // fuera de los bloques: pausa
 
   corriendo = true;
   try {
+    // Al entrar en el bloque, encola a los activos (1x/día) si está habilitado.
+    if (cfg.autoEnqueue && cfg.lastEnqueueDate !== schedule.ymdInTz()) {
+      await autoEnqueueEnabled();
+      await schedule.markEnqueued();
+    }
+
     const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=created_at.asc&limit=1');
     const item = rows && rows[0];
     if (!item) return;
@@ -149,13 +158,15 @@ async function status() {
   ]);
   const pendientes = pend || [];
   const ultimas = hoy || [];
+  const cfg = await schedule.get();
   return {
     pendientes: pendientes.length,
     proximo: pendientes[0] ? { phone: pendientes[0].phone, nombre: pendientes[0].nombre } : null,
     enviadas24h: ultimas.filter((r) => r.estado === 'enviada').length,
     errores24h: ultimas.filter((r) => r.estado === 'error').length,
-    enHorario: dentroDeHorario(),
-    horario: `${HOUR_START}:00–${HOUR_END}:00${WEEKDAYS_ONLY ? ' (L–V)' : ''} ${TZ}`,
+    scheduleEnabled: cfg.enabled,
+    enHorario: schedule.inWindow(cfg),
+    horario: horarioTexto(cfg),
     minutosEstimados: pendientes.length, // 1 por minuto
     activo: calls.callsEnabled,
   };
@@ -169,4 +180,4 @@ async function cancelarTodo() {
   return { canceladas: n };
 }
 
-module.exports = { enqueue, tick, status, cancelarTodo, dentroDeHorario, TZ };
+module.exports = { enqueue, tick, status, cancelarTodo, autoEnqueueEnabled, TZ };

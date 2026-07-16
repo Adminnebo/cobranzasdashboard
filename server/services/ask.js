@@ -6,11 +6,15 @@
 
 const { getCachedData } = require('./cache');
 const { computeMetrics } = require('./metrics');
-const { buildPortfolio } = require('./ai');
 const { getDailyHistory } = require('./history');
+const clienteConfig = require('./clienteConfig');
+const ivr = require('./ivr');
+const promesas = require('./promesas');
+const queue = require('./queue');
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-const MAX_CLIENTES = 1000; // tope para no disparar tokens
+const MAX_CLIENTES = 1200; // tope para no disparar tokens
+const MAX_LLAMADAS = 500;
 
 const money = (n) => Math.round(n || 0).toLocaleString('es-MX');
 
@@ -33,9 +37,8 @@ function estCost(model, pin = 0, pout = 0) {
   return (pin / 1e6) * rate.in + (pout / 1e6) * rate.out;
 }
 
-function buildContext(clientes, llamadas, metrics, history) {
+function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap, callsByPhone, promesasResumen, colaEstado }) {
   const m = metrics;
-  const portfolio = buildPortfolio(clientes, llamadas);
 
   const resumen = [
     `Total clientes: ${m.totalClientes}`,
@@ -44,7 +47,9 @@ function buildContext(clientes, llamadas, metrics, history) {
     `Crédito ofrecido: $${money(m.creditoOfrecido)} (utilización ${m.utilizacionCredito}%)`,
     `Ticket promedio de deuda: $${money(m.ticketPromedio)}`,
     `Clientes contactados: ${m.clientesContactados} (tasa ${m.tasaContacto}%)`,
-    `Llamadas: ${m.totalLlamadas}; con compromiso de pago: ${m.llamadasConCompromiso}`,
+    `Clientes activos para llamar (enabled): ${m.clientesHabilitados}`,
+    `Clientes marcados como IVR/contestadora: ${ivrMap.size}`,
+    `Llamadas totales: ${m.totalLlamadas}; con compromiso de pago: ${m.llamadasConCompromiso}`,
   ].join('\n');
 
   const intencion = m.intencionDistribucion.map((d) => `  ${d.label}: ${d.count} (${d.pct}%)`).join('\n');
@@ -54,23 +59,44 @@ function buildContext(clientes, llamadas, metrics, history) {
     .map((h) => `  ${h.date}: total $${money(h.deudaTotal)}, vencido $${money(h.deudaVencida)}${h.seeded ? ' (est.)' : ''}`)
     .join('\n');
 
-  const orden = [...clientes].sort((a, b) => (b.deuda_total || 0) - (a.deuda_total || 0));
-  const truncado = orden.length > MAX_CLIENTES;
-  const filas = orden.slice(0, MAX_CLIENTES)
-    .map((c) => `${c.name} | total ${money(c.deuda_total)} | vencido ${money(c.deuda_vencida)} | limite ${money(c.credito_ofrecido)} | tel ${c.phone}`)
+  // Promesas de pago
+  const pr = promesasResumen || {};
+  const promesasCtx = [
+    `Pendientes: ${pr.pendientes || 0} · cumplidas: ${pr.cumplidas || 0} · incumplidas: ${pr.incumplidas || 0}`,
+    ...(pr.proximas || []).slice(0, 15).map((p) => `  ${p.nombre || p.phone} promete el ${p.fecha_prometida} ($${money(p.monto_al_prometer)})`),
+  ].join('\n');
+
+  // Cola de llamadas
+  const cola = colaEstado
+    ? `Pendientes en cola: ${colaEstado.pendientes} · enviadas 24h: ${colaEstado.enviadas24h} · horario: ${colaEstado.horario} · ${colaEstado.scheduleEnabled ? 'ACTIVO' : 'desactivado'}`
+    : '';
+
+  // Todas las llamadas (compactas, más recientes primero)
+  const llamOrden = [...llamadas].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  const llamTrunc = llamOrden.length > MAX_LLAMADAS;
+  const llamadasCtx = llamOrden.slice(0, MAX_LLAMADAS)
+    .map((l) => `${(l.created_at || '').slice(0, 16)} | ${l.name || l.phone} | ${l.intencion_pago} | fecha_pago "${l.fecha_pago || ''}" | ${l.notas || ''}`)
     .join('\n');
 
-  // Detalle de llamadas (si hay): intención + notas por cliente contactado.
-  const llamadasCtx = portfolio.filter((p) => p.contactado)
-    .map((p) => `${p.name} | intención ${p.intencion_pago} | fecha_pago "${p.fecha_pago}" | ${p.notas}`)
-    .join('\n');
+  // Clientes con TODO: deuda, estado enabled/ivr y su última llamada
+  const orden = [...clientes].sort((a, b) => (b.deuda_total || 0) - (a.deuda_total || 0));
+  const truncado = orden.length > MAX_CLIENTES;
+  const filas = orden.slice(0, MAX_CLIENTES).map((c) => {
+    const calls = callsByPhone.get(c.phone) || [];
+    const ult = calls[0];
+    const estado = ivrMap.has(c.phone) ? 'IVR' : enabledMap.get(c.phone) ? 'activo' : 'inactivo';
+    const ultTxt = ult ? ` | últ.llamada ${(ult.created_at || '').slice(0, 10)} ${ult.intencion_pago}${ult.fecha_pago ? ` (promete ${ult.fecha_pago})` : ''}` : ' | sin llamadas';
+    return `${c.name} | cód ${c.codigo || ''} | total ${money(c.deuda_total)} | vencido ${money(c.deuda_vencida)} | limite ${money(c.credito_ofrecido)} | tel ${c.phone} | ${estado} | ${calls.length} llamada(s)${ultTxt}`;
+  }).join('\n');
 
   return [
     `# RESUMEN DE CARTERA\n${resumen}`,
-    `\n# INTENCIÓN DE PAGO (por cliente, última llamada)\n${intencion}`,
+    `\n# INTENCIÓN DE PAGO (distribución)\n${intencion}`,
     `\n# SEVERIDAD DE DEUDA (por % vencido)\n${severidad}`,
     hist ? `\n# HISTÓRICO DE DEUDA (últimos días)\n${hist}` : '',
-    llamadasCtx ? `\n# RESULTADOS DE LLAMADAS\n${llamadasCtx}` : '',
+    `\n# PROMESAS DE PAGO\n${promesasCtx}`,
+    cola ? `\n# COLA DE LLAMADAS\n${cola}` : '',
+    llamadasCtx ? `\n# LLAMADAS${llamTrunc ? ` (últimas ${MAX_LLAMADAS} de ${llamOrden.length})` : ''}\n${llamadasCtx}` : '',
     `\n# CLIENTES (ordenados por deuda total, moneda DOP)${truncado ? ` — mostrando top ${MAX_CLIENTES} de ${orden.length}` : ''}\n${filas}`,
   ].filter(Boolean).join('\n');
 }
@@ -78,7 +104,22 @@ function buildContext(clientes, llamadas, metrics, history) {
 async function ask(question) {
   const { clientes, llamadas } = await getCachedData();
   const metrics = computeMetrics(clientes, llamadas);
-  const history = await getDailyHistory().catch(() => []);
+  const [history, enabledMap, ivrMap, promesasResumen, colaEstado] = await Promise.all([
+    getDailyHistory().catch(() => []),
+    clienteConfig.getEnabledMap().catch(() => new Map()),
+    ivr.getIvrMap().catch(() => new Map()),
+    promesas.resumen().catch(() => ({})),
+    queue.status().catch(() => null),
+  ]);
+
+  // Llamadas agrupadas por teléfono (recientes primero).
+  const callsByPhone = new Map();
+  for (const ll of llamadas) {
+    if (!ll.phone) continue;
+    if (!callsByPhone.has(ll.phone)) callsByPhone.set(ll.phone, []);
+    callsByPhone.get(ll.phone).push(ll);
+  }
+  for (const arr of callsByPhone.values()) arr.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
   if (!process.env.OPENAI_API_KEY) {
     return {
@@ -87,16 +128,18 @@ async function ask(question) {
     };
   }
 
-  const context = buildContext(clientes, llamadas, metrics, history);
+  const context = buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap, callsByPhone, promesasResumen, colaEstado });
 
   const OpenAI = require('openai');
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60000 });
 
   const system =
-    'Eres un analista experto en cobranzas. Respondes preguntas y haces proyecciones usando ' +
-    'EXCLUSIVAMENTE los datos proporcionados de la cartera (moneda: pesos dominicanos, DOP). ' +
-    'Puedes calcular sumas, porcentajes, proyecciones y escenarios ("qué pasaría si..."). ' +
-    'Si la pregunta pide algo que no está en los datos, dilo claramente en vez de inventar. ' +
+    'Eres un analista experto en cobranzas con acceso a TODA la operación: cartera de clientes ' +
+    '(deuda, crédito, teléfono, código), estado de cada cliente (activo/inactivo para llamar, IVR), ' +
+    'historial de llamadas (intención, fecha de pago prometida, notas), promesas de pago y su ' +
+    'cumplimiento, la cola de llamadas y el histórico de deuda. Responde usando EXCLUSIVAMENTE esos ' +
+    'datos (moneda: pesos dominicanos, DOP). Puedes calcular sumas, porcentajes, proyecciones, ' +
+    'escenarios y segmentar clientes. Si algo no está en los datos, dilo claramente en vez de inventar. ' +
     'Responde en español, conciso y accionable, con cifras en formato $1,234,567. ' +
     'Cuando ayude, usa listas o una tabla markdown corta. ' +
     'NO uses LaTeX ni notación matemática con \\[ \\], \\( \\) o comandos como \\times/\\text. ' +

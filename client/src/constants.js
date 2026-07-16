@@ -4,6 +4,7 @@ export const INTENCION = {
   pago_inmediato:   { label: 'Pago inmediato',   color: 'var(--q-1)' },
   fecha_especifica: { label: 'Fecha específica', color: 'var(--q-2)' },
   negociacion:      { label: 'Negociación',      color: 'var(--q-3)' },
+  proximo_corte:    { label: 'Próximo corte',    color: 'var(--q-3)' },
   promesa_vaga:     { label: 'Promesa vaga',     color: 'var(--q-4)' },
   no_contesta:      { label: 'No contesta',      color: 'var(--q-5)' },
   disputa:          { label: 'Disputa',          color: 'var(--q-6)' },

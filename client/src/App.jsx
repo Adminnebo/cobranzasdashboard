@@ -6,7 +6,6 @@ import KpiCard from './components/KpiCard';
 import BarList from './components/BarList';
 import Donut from './components/Donut';
 import CarteraTable from './components/CarteraTable';
-import CallsTable from './components/CallsTable';
 import ClientesTable from './components/ClientesTable';
 import AiPanel from './components/AiPanel';
 import HistoryCard from './components/HistoryCard';
@@ -17,8 +16,7 @@ import { useAuth } from './auth/AuthProvider';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { id: 'clientes', label: 'Clientes', icon: '👥' },
-  { id: 'llamadas', label: 'Llamadas', icon: '📞' },
+  { id: 'clientes', label: 'Clientes y llamadas', icon: '👥' },
   { id: 'asistente', label: 'Asistente IA', icon: '🤖' },
 ];
 
@@ -169,7 +167,6 @@ export default function App() {
           <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
             <span className="tab-ic">{t.icon}</span>{t.label}
             {t.id === 'clientes' && <span className="tab-count">{num(m.totalClientes)}</span>}
-            {t.id === 'llamadas' && <span className="tab-count">{num(m.totalLlamadas)}</span>}
           </button>
         ))}
         {me && me.isAdmin && (
@@ -185,13 +182,7 @@ export default function App() {
 
       {tab === 'clientes' && (
         <div className="card" style={{ padding: 0 }}>
-          <ClientesTable clientes={data.clientes} onChanged={reloadData} />
-        </div>
-      )}
-
-      {tab === 'llamadas' && (
-        <div className="card" style={{ padding: 0 }}>
-          <CallsTable llamadas={data.llamadas} />
+          <ClientesTable clientes={data.clientes} llamadas={data.llamadas} onChanged={reloadData} />
         </div>
       )}
 
