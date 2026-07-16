@@ -39,6 +39,7 @@ function estCost(model, pin = 0, pout = 0) {
 
 function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap, callsByPhone, promesasResumen, colaEstado }) {
   const m = metrics;
+  const clientByPhone = new Map(clientes.map((c) => [c.phone, c]));
 
   const resumen = [
     `Total clientes: ${m.totalClientes}`,
@@ -75,7 +76,11 @@ function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap
   const llamOrden = [...llamadas].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const llamTrunc = llamOrden.length > MAX_LLAMADAS;
   const llamadasCtx = llamOrden.slice(0, MAX_LLAMADAS)
-    .map((l) => `${(l.created_at || '').slice(0, 16)} | ${l.name || l.phone} | ${l.intencion_pago} | fecha_pago "${l.fecha_pago || ''}" | ${l.notas || ''}`)
+    .map((l) => {
+      const cli = clientByPhone.get(l.phone);
+      const quien = cli ? cli.name : (l.name || '(sin cliente en cartera)');
+      return `${(l.created_at || '').slice(0, 16)} | tel ${l.phone} | cliente: ${quien} | ${l.intencion_pago} | fecha_pago "${l.fecha_pago || ''}" | ${l.notas || ''}`;
+    })
     .join('\n');
 
   // Clientes con TODO: deuda, estado enabled/ivr y su última llamada
@@ -140,6 +145,9 @@ async function ask(question) {
     'cumplimiento, la cola de llamadas y el histórico de deuda. Responde usando EXCLUSIVAMENTE esos ' +
     'datos (moneda: pesos dominicanos, DOP). Puedes calcular sumas, porcentajes, proyecciones, ' +
     'escenarios y segmentar clientes. Si algo no está en los datos, dilo claramente en vez de inventar. ' +
+    'IMPORTANTE: para relacionar una llamada con su cliente usa EXACTAMENTE el teléfono (campo "tel"); ' +
+    'cada línea de llamada ya trae "cliente:" con el nombre correcto resuelto por teléfono — úsalo, ' +
+    'NO asocies por nombre ni por cercanía en la lista. Si un teléfono no está entre los clientes, dilo. ' +
     'Responde en español, conciso y accionable, con cifras en formato $1,234,567. ' +
     'Cuando ayude, usa listas o una tabla markdown corta. ' +
     'NO uses LaTeX ni notación matemática con \\[ \\], \\( \\) o comandos como \\times/\\text. ' +
