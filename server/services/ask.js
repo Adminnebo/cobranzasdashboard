@@ -18,6 +18,78 @@ const MAX_LLAMADAS = 500;
 
 const money = (n) => Math.round(n || 0).toLocaleString('es-MX');
 
+// Columnas del origen que ya están representadas en los campos normalizados.
+// Cualquier otra columna de la tabla se pasa tal cual al contexto del Asistente,
+// para que pueda consultar TODOS los datos aunque la UI no los muestre.
+// Columnas a excluir del contexto del Asistente (ruido que encarece tokens).
+// Ej: ASK_EXCLUDE_COLS=FechaSync  -> ahorra ~11k tokens (~$0.0016) por pregunta.
+const EXCLUIDAS = new Set(
+  (process.env.ASK_EXCLUDE_COLS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+);
+
+const YA_MAPEADAS = new Set([
+  'id', 'cliente_id', 'call_id', 'codigo', 'code',
+  'nombre', 'name', 'cliente', 'razon_social',
+  'telefono', 'phone', 'celular', 'numero', 'phone_number',
+  'email', 'correo', 'empresa', 'company',
+  'limite', 'credito', 'credit_limit', 'credito_ofrecido', 'linea_credito',
+  'balance', 'deuda_total', 'saldo_total', 'balance_total', 'deuda', 'total',
+  'vencido', 'deuda_vencida', 'saldo_vencido', 'balance_vencido', 'overdue',
+  'fechahora', 'ultimo_pago', 'last_payment', 'fecha_ultimo_pago',
+  'dias_mora', 'dias_vencido', 'days_overdue', 'mora',
+  'created_at', 'fecha', 'timestamp', 'date',
+  'fecha_pago', 'payment_date', 'promesa_fecha',
+  'intencion_pago', 'intencion', 'intent', 'payment_intent',
+  'notas', 'notes', 'resumen', 'summary',
+  'transcripcion', 'transcript', 'transcripcion_texto',
+  'grabacion', 'recording', 'recording_url', 'audio_url',
+]);
+
+/**
+ * Analiza las columnas NO mapeadas de un conjunto de filas y separa:
+ *  - constantes: mismo valor en todas las filas (se mandan UNA vez, no por fila)
+ *  - varying:    cambian entre filas (se mandan por fila)
+ * Así el Asistente ve todas las columnas sin desperdiciar tokens.
+ */
+function analizarExtras(rows) {
+  const vals = new Map();
+  for (const r of rows) {
+    if (!r || !r._raw) continue;
+    for (const [k, v] of Object.entries(r._raw)) {
+      if (YA_MAPEADAS.has(k.toLowerCase()) || EXCLUIDAS.has(k.toLowerCase())) continue;
+      if (v === null || v === undefined || v === '') continue;
+      if (!vals.has(k)) vals.set(k, new Set());
+      const s = vals.get(k);
+      if (s.size <= 1) s.add(String(v).trim());
+    }
+  }
+  const constantes = {};
+  const varying = new Set();
+  for (const [k, s] of vals) {
+    if (s.size === 1) constantes[k] = [...s][0];
+    else varying.add(k);
+  }
+  return { constantes, varying };
+}
+
+/** "col=valor | col2=valor2" solo con las columnas que varían entre filas. */
+function extras(row, varying) {
+  if (!row || !row._raw || !varying || !varying.size) return '';
+  const out = [];
+  for (const [k, v] of Object.entries(row._raw)) {
+    if (!varying.has(k)) continue;
+    if (v === null || v === undefined || v === '') continue;
+    const val = String(v).trim().slice(0, 60);
+    if (val) out.push(`${k}=${val}`);
+  }
+  return out.length ? ' | ' + out.join(' | ') : '';
+}
+
+const constTxt = (c) => {
+  const e = Object.entries(c);
+  return e.length ? `(columnas iguales en todas las filas: ${e.map(([k, v]) => `${k}=${v}`).join(', ')})` : '';
+};
+
 // Costo estimado (USD/1M tokens). Tabla por modelo con match por prefijo.
 const PRICING = {
   'gpt-4.1-nano': { in: 0.10, out: 0.40 },
@@ -40,6 +112,9 @@ function estCost(model, pin = 0, pout = 0) {
 function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap, callsByPhone, promesasResumen, colaEstado }) {
   const m = metrics;
   const clientByPhone = new Map(clientes.map((c) => [c.phone, c]));
+  // Columnas extra de cada tabla (las que la UI no muestra).
+  const exCli = analizarExtras(clientes);
+  const exLla = analizarExtras(llamadas);
 
   const resumen = [
     `Total clientes: ${m.totalClientes}`,
@@ -79,7 +154,7 @@ function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap
     .map((l) => {
       const cli = clientByPhone.get(l.phone);
       const quien = cli ? cli.name : (l.name || '(sin cliente en cartera)');
-      return `${(l.created_at || '').slice(0, 16)} | tel ${l.phone} | cliente: ${quien} | ${l.intencion_pago} | fecha_pago "${l.fecha_pago || ''}" | ${l.notas || ''}`;
+      return `${(l.created_at || '').slice(0, 16)} | tel ${l.phone} | cliente: ${quien} | ${l.intencion_pago} | fecha_pago "${l.fecha_pago || ''}" | ${l.notas || ''}${extras(l, exLla.varying)}`;
     })
     .join('\n');
 
@@ -91,7 +166,7 @@ function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap
     const ult = calls[0];
     const estado = ivrMap.has(c.phone) ? 'IVR' : enabledMap.get(c.phone) ? 'activo' : 'inactivo';
     const ultTxt = ult ? ` | últ.llamada ${(ult.created_at || '').slice(0, 10)} ${ult.intencion_pago}${ult.fecha_pago ? ` (promete ${ult.fecha_pago})` : ''}` : ' | sin llamadas';
-    return `${c.name} | cód ${c.codigo || ''} | total ${money(c.deuda_total)} | vencido ${money(c.deuda_vencida)} | limite ${money(c.credito_ofrecido)} | tel ${c.phone} | ${estado} | ${calls.length} llamada(s)${ultTxt}`;
+    return `${c.name} | cód ${c.codigo || ''} | total ${money(c.deuda_total)} | vencido ${money(c.deuda_vencida)} | limite ${money(c.credito_ofrecido)} | tel ${c.phone} | email ${c.email || '-'} | ${estado} | ${calls.length} llamada(s)${ultTxt}${extras(c, exCli.varying)}`;
   }).join('\n');
 
   return [
@@ -101,8 +176,8 @@ function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap
     hist ? `\n# HISTÓRICO DE DEUDA (últimos días)\n${hist}` : '',
     `\n# PROMESAS DE PAGO\n${promesasCtx}`,
     cola ? `\n# COLA DE LLAMADAS\n${cola}` : '',
-    llamadasCtx ? `\n# LLAMADAS${llamTrunc ? ` (últimas ${MAX_LLAMADAS} de ${llamOrden.length})` : ''}\n${llamadasCtx}` : '',
-    `\n# CLIENTES (ordenados por deuda total, moneda DOP)${truncado ? ` — mostrando top ${MAX_CLIENTES} de ${orden.length}` : ''}\n${filas}`,
+    llamadasCtx ? `\n# LLAMADAS${llamTrunc ? ` (últimas ${MAX_LLAMADAS} de ${llamOrden.length})` : ''} ${constTxt(exLla.constantes)}\n${llamadasCtx}` : '',
+    `\n# CLIENTES (ordenados por deuda total, moneda DOP)${truncado ? ` — mostrando top ${MAX_CLIENTES} de ${orden.length}` : ''} ${constTxt(exCli.constantes)}\n${filas}`,
   ].filter(Boolean).join('\n');
 }
 

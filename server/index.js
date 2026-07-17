@@ -71,7 +71,8 @@ app.get('/api/data', async (req, res) => {
       if (!prev || new Date(ll.created_at) > new Date(prev.created_at)) ultimaPorTel.set(ll.phone, ll);
     }
 
-    const conFlag = clientes.map((c) => {
+    const conFlag = clientes.map((cRaw) => {
+      const { _raw, ...c } = cRaw; // _raw es solo para el backend (Asistente)
       const i = ivrMap.get(c.phone);
       const ll = ultimaPorTel.get(c.phone);
       return {
@@ -94,7 +95,8 @@ app.get('/api/data', async (req, res) => {
     });
 
     const metrics = computeMetrics(conFlag, llamadas);
-    res.json({ source, clientes: conFlag, llamadas, metrics, cachedAt, cacheAgeMs });
+    const llamadasSlim = llamadas.map(({ _raw, ...l }) => l);
+    res.json({ source, clientes: conFlag, llamadas: llamadasSlim, metrics, cachedAt, cacheAgeMs });
   } catch (err) {
     console.error('[/api/data]', err);
     res.status(500).json({ error: err.message });

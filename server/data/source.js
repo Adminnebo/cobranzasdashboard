@@ -93,6 +93,10 @@ function normalizeCliente(r) {
     dias_mora: num(pick(lc, 'dias_mora', 'dias_vencido', 'days_overdue', 'mora')),
     ultimo_pago: str(pick(lc, 'ultimo_pago', 'last_payment', 'fecha_ultimo_pago', 'fechahora') || ''),
     email: str(pick(lc, 'email', 'correo') || ''),
+    // Fila original completa: conserva TODAS las columnas de la tabla (RNC,
+    // FechaSync, etc.) aunque la UI no las muestre. Uso interno del backend
+    // (Asistente IA); se elimina antes de mandar al navegador.
+    _raw: r,
   };
 }
 
@@ -108,6 +112,8 @@ function normalizeLlamada(r) {
     notas: str(pick(lc, 'notas', 'notes', 'resumen', 'summary') || ''),
     transcripcion: str(pick(lc, 'transcripcion', 'transcript', 'transcripcion_texto') || ''),
     grabacion: str(pick(lc, 'grabacion', 'recording', 'recording_url', 'audio_url') || ''),
+    // Fila original completa (incluye columnas no mapeadas, p.ej. follow_up).
+    _raw: r,
   };
 }
 
