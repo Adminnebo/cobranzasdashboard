@@ -114,6 +114,30 @@ export default function App() {
     return <Login />;
   }
 
+  // ── Puerta de acceso por plataforma ──
+  // Si el usuario tiene perfil cargado y no incluye 'cobranzas', no entra.
+  if (me && Array.isArray(me.platforms) && me.platforms.length && !me.platforms.includes('cobranzas')) {
+    const destinos = {
+      inbox: ['Conversaciones', 'https://whatsapp.neboaiconsulting.com'],
+      cotizaciones: ['Panel de cotizaciones', 'https://panelcotizaciones.neboaiconsulting.com'],
+    };
+    return (
+      <div className="app">
+        <div className="noacc">
+          <div className="noacc__ic">🔒</div>
+          <h1>Sin acceso a Cobranzas</h1>
+          <p>Tu usuario no tiene permiso para esta plataforma. Pídeselo a un administrador.</p>
+          <div className="noacc__links">
+            {me.platforms.filter((p) => destinos[p]).map((p) => (
+              <a key={p} className="noacc__link" href={destinos[p][1]}>{destinos[p][0]} →</a>
+            ))}
+          </div>
+          <button className="noacc__out" onClick={signOut}>Cerrar sesión</button>
+        </div>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="app">

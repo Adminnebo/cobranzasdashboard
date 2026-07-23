@@ -526,3 +526,12 @@ tbody tr:hover { background: var(--surface-2); }
 }
 .ask-input:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
 .ask-bar .btn { height: 46px; padding: 0 20px; }
+
+/* ===== sin acceso a la plataforma ===== */
+.noacc { max-width: 420px; margin: 12vh auto; padding: 40px 28px; text-align: center; color: var(--text-primary); }
+.noacc__ic { font-size: 46px; margin-bottom: 14px; }
+.noacc h1 { font-size: 22px; font-weight: 800; margin-bottom: 10px; }
+.noacc p { color: var(--text-secondary); font-size: 14.5px; line-height: 1.5; }
+.noacc__links { display: flex; flex-direction: column; gap: 10px; margin: 22px 0; }
+.noacc__link { padding: 12px; border: 1px solid var(--border); border-radius: 10px; text-decoration: none; color: var(--accent, #2f6df6); font-weight: 600; }
+.noacc__out { margin-top: 8px; padding: 10px 20px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-secondary); font-weight: 600; cursor: pointer; background: none; }

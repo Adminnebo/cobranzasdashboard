@@ -10,7 +10,7 @@ const { computeMetrics } = require('./services/metrics');
 const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
 const chatStore = require('./services/chatStore');
-const { requireAuth, requireAdmin, publicConfig, authEnabled } = require('./services/auth');
+const { requireAuth, requireAdmin, requirePlatform, publicConfig, authEnabled, perfilDe, plataformasDe } = require('./services/auth');
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
 const ivr = require('./services/ivr');
@@ -49,6 +49,22 @@ app.get('/api/recordings/proxy', require('./services/recordingProxy').handle);
 
 // A partir de aquí, todas las rutas /api requieren sesión (si la auth está activada).
 app.use('/api', requireAuth);
+
+// /api/me va ANTES del gate de plataforma: aunque el usuario no tenga acceso a
+// cobranzas, el frontend necesita leer sus plataformas para mostrar la pantalla
+// de "sin acceso" (y a qué sí puede entrar).
+app.get('/api/me', async (req, res) => {
+  const p = req.user ? await perfilDe(req.user.id) : null;
+  res.json({
+    email: req.user ? req.user.email : null,
+    isAdmin: req.user ? !!req.user.isAdmin : false,
+    role: (p && p.role) || null,
+    platforms: plataformasDe(p && p.role, p && p.platforms)
+  });
+});
+
+// El resto exige acceso a la plataforma 'cobranzas'.
+app.use('/api', requirePlatform('cobranzas'));
 
 // Fuentes + métricas puras (servidas desde el caché con TTL), con el flag
 // enabled de cada cliente cruzado desde Supabase (cliente_config).
@@ -301,14 +317,6 @@ app.get('/api/calls/log', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
-
-// Info del usuario actual (para el frontend: mostrar email + si es admin).
-app.get('/api/me', (req, res) => {
-  res.json({
-    email: req.user ? req.user.email : null,
-    isAdmin: req.user ? !!req.user.isAdmin : false,
-  });
 });
 
 // ── Administración de usuarios (solo admins) ──
