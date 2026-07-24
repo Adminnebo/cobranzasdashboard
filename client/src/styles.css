@@ -230,6 +230,7 @@ body {
 .sched-blocks { border-top: 1px solid var(--grid); border-bottom: 1px solid var(--grid); padding: 12px 0; }
 .sched-block { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
 .sched-block input[type=time] { font: inherit; font-size: 0.82rem; padding: 5px 7px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); color-scheme: light dark; }
+.sched-agent { width: 100%; font: inherit; font-size: 0.82rem; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
 .sched-block span { color: var(--text-muted); font-size: 0.8rem; }
 .sched-x { border: none; background: none; color: var(--critical); cursor: pointer; font-size: 0.85rem; padding: 2px 6px; }
 .sched-x:disabled { opacity: 0.3; cursor: default; }

@@ -17,6 +17,7 @@ const ivr = require('./services/ivr');
 const calls = require('./services/calls');
 const queue = require('./services/queue');
 const schedule = require('./services/schedule');
+const agents = require('./services/agents');
 const promesas = require('./services/promesas');
 const history = require('./services/history');
 
@@ -256,15 +257,28 @@ app.get('/api/calls/schedule', async (req, res) => {
 
 app.put('/api/calls/schedule', async (req, res) => {
   try {
-    const { enabled, weekdaysOnly, autoEnqueue, blocks } = req.body || {};
-    const cfg = await schedule.set(
-      { enabled: !!enabled, weekdaysOnly: !!weekdaysOnly, autoEnqueue: !!autoEnqueue, blocks },
-      req.user ? req.user.email : null
-    );
+    const b = req.body || {};
+    const patch = {
+      enabled: !!b.enabled, weekdaysOnly: !!b.weekdaysOnly, autoEnqueue: !!b.autoEnqueue, blocks: b.blocks,
+    };
+    // El agente solo se toca si viene en el body, para no borrarlo sin querer
+    // al guardar otros ajustes. agentId '' o null => sin agente.
+    if ('agentId' in b) {
+      patch.agentId = b.agentId || null;
+      patch.agentName = b.agentName || null;
+    }
+    const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
+});
+
+// Agentes de voz disponibles (para elegir quién llama). Se consulta desde el
+// servidor: la API key nunca sale al navegador.
+app.get('/api/agents', async (req, res) => {
+  try { res.json(await agents.list()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Encola manualmente a los clientes activos ahora (sin esperar al bloque).

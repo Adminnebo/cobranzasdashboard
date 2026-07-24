@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchSchedule, saveSchedule } from '../api';
+import { fetchSchedule, saveSchedule, fetchAgents } from '../api';
 
-/** Configura el horario de llamadas (bloques) desde la UI. */
+/** Configura el horario de llamadas (bloques) y el agente que llama. */
 export default function SchedulePanel({ onSaved }) {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  const [agentes, setAgentes] = useState(null);   // { available, agents, error }
   const ref = useRef(null);
 
   useEffect(() => { fetchSchedule().then(setCfg).catch(() => {}); }, []);
+  // Los agentes se cargan al abrir el panel (no en cada render de la app).
+  useEffect(() => {
+    if (!open || agentes) return;
+    fetchAgents().then(setAgentes).catch((e) => setAgentes({ available: false, agents: [], error: e.message }));
+  }, [open, agentes]);
 
   // Cerrar al hacer click fuera.
   useEffect(() => {
@@ -37,6 +43,7 @@ export default function SchedulePanel({ onSaved }) {
     try {
       const saved = await saveSchedule({
         enabled: cfg.enabled, weekdaysOnly: cfg.weekdaysOnly, autoEnqueue: cfg.autoEnqueue, blocks: cfg.blocks,
+        agentId: cfg.agentId || null, agentName: cfg.agentName || null,
       });
       setCfg(saved);
       setOpen(false);
@@ -83,6 +90,33 @@ export default function SchedulePanel({ onSaved }) {
             <input type="checkbox" checked={cfg.autoEnqueue} onChange={(e) => set({ autoEnqueue: e.target.checked })} />
             Encolar a los clientes activos automáticamente (1×/día)
           </label>
+
+          {/* Agente de voz que hace las llamadas: se manda como agentId en el webhook. */}
+          <div className="sched-blocks">
+            <div className="sched-lbl">Agente que llama</div>
+            {!agentes && <div className="sched-tz">Cargando agentes…</div>}
+            {agentes && !agentes.available && (
+              <div className="sched-err">No se pudieron cargar los agentes. {agentes.error || ''}</div>
+            )}
+            {agentes && agentes.available && (
+              <select
+                className="sched-agent"
+                value={cfg.agentId || ''}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const a = (agentes.agents || []).find((x) => x.id === id);
+                  set({ agentId: id || null, agentName: a ? a.name : null });
+                }}
+              >
+                <option value="">— Sin agente (usa el default del flujo) —</option>
+                {(agentes.agents || []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}{a.connected ? '' : ' (desconectado)'}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
 
           {err && <div className="sched-err">{err}</div>}
 
