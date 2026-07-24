@@ -25,6 +25,10 @@ const DEFAULT = {
   weekdaysOnly: true,
   autoEnqueue: true,
   blocks: [{ start: '09:00', end: '18:00' }],
+  // Agente de voz elegido en Ajustes. Se manda como `agentId` en el webhook
+  // de salientes; no cambia la asignación del número.
+  agentId: null,
+  agentName: null,
 };
 
 function partsInTz(d = new Date()) {
@@ -69,6 +73,8 @@ async function get(force = false) {
         weekdaysOnly: !!row.weekdays_only,
         autoEnqueue: !!row.auto_enqueue,
         blocks: normBlocks(row.blocks),
+        agentId: row.agent_id || null,
+        agentName: row.agent_name || null,
         lastEnqueueDate: row.last_enqueue_date || null,
         tz: TZ,
       }
@@ -94,6 +100,8 @@ async function set(patch, by) {
     weekdays_only: !!next.weekdaysOnly,
     auto_enqueue: !!next.autoEnqueue,
     blocks: normBlocks(next.blocks),
+    agent_id: next.agentId || null,
+    agent_name: next.agentName || null,
     updated_at: new Date().toISOString(),
     updated_by: by || null,
   }, 'id');

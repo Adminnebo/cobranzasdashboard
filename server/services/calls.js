@@ -16,6 +16,7 @@
  */
 
 const db = require('./supabaseDb');
+const schedule = require('./schedule');
 
 const CALL_URL = process.env.N8N_CALL_URL || '';
 // Sub-agente de seguimiento: llama a quien prometió pagar y no pagó.
@@ -74,6 +75,14 @@ async function triggerOne(cliente, agente = 'principal') {
   if (!callsEnabled) throw new Error('Llamadas no configuradas (falta N8N_CALL_URL)');
   const url = urlDe(agente);
   const payload = buildPayload(cliente);
+  // Agente de voz elegido en Ajustes: el flujo de n8n lo usa para saber quién
+  // llama. Si no hay ninguno configurado, no se manda (el flujo usa su default).
+  try {
+    const cfg = await schedule.get();
+    if (cfg && cfg.agentId) payload.agentId = cfg.agentId;
+  } catch (e) {
+    console.error('[calls] no se pudo leer el agente configurado:', e.message);
+  }
   if (agente === 'seguimiento') {
     payload.motivo = 'promesa_incumplida';
     if (cliente.fecha_prometida) payload.fecha_prometida = cliente.fecha_prometida;

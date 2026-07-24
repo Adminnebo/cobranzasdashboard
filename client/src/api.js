@@ -74,6 +74,8 @@ export const cancelQueue = () => del('/api/calls/queue');
 export const resetIvr = (phone) => post(`/api/clientes/${phone}/ivr/reset`, {});
 export const fetchSchedule = () => get('/api/calls/schedule');
 export const saveSchedule = (cfg) => put('/api/calls/schedule', cfg);
+// Agentes de voz disponibles (el servidor proxea el servicio; la key no viaja al navegador).
+export const fetchAgents = () => get('/api/agents');
 export const enqueueEnabled = () => post('/api/calls/enqueue-enabled', {});
 
 // ── Auth / usuarios ──
