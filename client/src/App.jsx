@@ -15,9 +15,9 @@ import UsersAdmin from './components/UsersAdmin';
 import { useAuth } from './auth/AuthProvider';
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { id: 'clientes', label: 'Clientes y llamadas', icon: '👥' },
-  { id: 'asistente', label: 'Asistente IA', icon: '🤖' },
+  { id: 'dashboard', label: 'Dashboard', icon: '📊', perm: 'cobranzas.cartera' },
+  { id: 'clientes', label: 'Clientes y llamadas', icon: '👥', perm: 'cobranzas.clientes' },
+  { id: 'asistente', label: 'Asistente IA', icon: '🤖', perm: 'cobranzas.asistente' },
 ];
 
 export default function App() {
@@ -106,6 +106,18 @@ export default function App() {
     });
   }, [data, analysis]);
 
+  // ── Permisos granulares ──
+  // admin de la app o permissions null (sin migrar) = puede todo; si no, solo lo
+  // que traiga la lista. El backend es la fuente de verdad; esto oculta pestañas.
+  const puede = (k) => !me || me.isAdmin || !Array.isArray(me.permissions) || me.permissions.includes(k);
+  const tabsVisibles = TABS.filter((t) => puede(t.perm));
+  // Si la pestaña activa dejó de estar permitida, salta a la primera visible.
+  useEffect(() => {
+    if (!me) return;
+    const activaOk = tab === 'usuarios' ? me.isAdmin : puede((TABS.find((t) => t.id === tab) || {}).perm);
+    if (!activaOk && tabsVisibles[0]) setTab(tabsVisibles[0].id);
+  }, [me]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Gate de autenticación ──
   if (authLoading) {
     return <div className="app"><div className="loading"><div className="spinner" />Cargando…</div></div>;
@@ -187,7 +199,7 @@ export default function App() {
       </header>
 
       <nav className="tabs">
-        {TABS.map((t) => (
+        {tabsVisibles.map((t) => (
           <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
             <span className="tab-ic">{t.icon}</span>{t.label}
             {t.id === 'clientes' && <span className="tab-count">{num(m.totalClientes)}</span>}
@@ -200,17 +212,17 @@ export default function App() {
         )}
       </nav>
 
-      {tab === 'dashboard' && (
+      {tab === 'dashboard' && puede('cobranzas.cartera') && (
         <DashboardView m={m} analysis={analysis} analyzing={analyzing} rows={rows} history={history} />
       )}
 
-      {tab === 'clientes' && (
+      {tab === 'clientes' && puede('cobranzas.clientes') && (
         <div className="card" style={{ padding: 0 }}>
           <ClientesTable clientes={data.clientes} llamadas={data.llamadas} onChanged={reloadData} />
         </div>
       )}
 
-      {tab === 'asistente' && <AssistantView />}
+      {tab === 'asistente' && puede('cobranzas.asistente') && <AssistantView />}
 
       {tab === 'usuarios' && me && me.isAdmin && <UsersAdmin currentEmail={me.email} />}
 

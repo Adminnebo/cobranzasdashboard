@@ -11,6 +11,7 @@
 
 const jwt = require('jsonwebtoken');
 const { createRemoteJWKSet, jwtVerify } = require('jose');
+const { permisosDe, plataformasDe: platsDe, puede } = require('../permcatalog');
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
@@ -22,13 +23,13 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SER
 const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas'];
 const _perfilCache = new Map();     // userId -> { info, exp }
 
-// Lee rol + plataformas de public.profiles (por REST, con la service key).
+// Lee rol + plataformas + permisos de public.profiles (por REST, con la service key).
 async function perfilDe(userId) {
   if (!userId || !SUPABASE_URL || !SERVICE_KEY) return null;
   const hit = _perfilCache.get(userId);
   if (hit && hit.exp > Date.now()) return hit.info;
   try {
-    const r = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + userId + '&select=role,platforms',
+    const r = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + userId + '&select=role,platforms,permissions',
       { headers: { apikey: SERVICE_KEY, Authorization: 'Bearer ' + SERVICE_KEY } });
     const rows = r.ok ? await r.json() : [];
     const info = rows[0] || {};
@@ -37,10 +38,8 @@ async function perfilDe(userId) {
   } catch { return null; }
 }
 
-function plataformasDe(role, platforms) {
-  if (role === 'super_admin' || role === 'admin') return PLATAFORMAS.slice();
-  return Array.isArray(platforms) ? platforms : PLATAFORMAS.slice();
-}
+// Firma vieja (role, platforms) por compatibilidad con quien la importe.
+function plataformasDe(role, platforms) { return platsDe({ role, platforms }); }
 
 // Admins bootstrap: emails en ADMIN_EMAILS (coma-separados). Además, cualquier
 // usuario con app_metadata.role === 'admin' también es admin.
@@ -111,10 +110,29 @@ function requirePlatform(key) {
     if (!req.user) return res.status(401).json({ error: 'No autenticado' });
     if (!SERVICE_KEY) return next();               // sin service key no podemos leer profiles: no limitamos
     const p = await perfilDe(req.user.id);
-    const perms = plataformasDe(p && p.role, p && p.platforms);
+    const perms = platsDe(p || {});
     req.role = (p && p.role) || null;
     req.platforms = perms;
+    req.permissions = permisosDe(p || {});
     if (!perms.includes(key)) return res.status(403).json({ error: 'Sin acceso a esta plataforma', platform: key });
+    next();
+  };
+}
+
+// Exige un permiso granular concreto (p.ej. 'cobranzas.llamadas'). El admin de
+// esta app (por app_metadata/ADMIN_EMAILS) pasa siempre, igual que super_admin/admin
+// de profiles. Sin service key para leer profiles, no bloquea (modo compatible).
+function requirePermission(key) {
+  return async (req, res, next) => {
+    if (!authEnabled) return next();
+    if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+    if (req.user.isAdmin) return next();             // admin de la app: acceso total
+    if (!SERVICE_KEY) return next();                 // sin poder leer profiles: no limitamos
+    const p = await perfilDe(req.user.id);
+    req.role = (p && p.role) || null;
+    req.platforms = platsDe(p || {});
+    req.permissions = permisosDe(p || {});
+    if (!puede(p || {}, key)) return res.status(403).json({ error: 'Sin permiso para esta acción', permission: key });
     next();
   };
 }
@@ -135,4 +153,4 @@ function publicConfig() {
   };
 }
 
-module.exports = { requireAuth, requireAdmin, requirePlatform, isAdmin, publicConfig, authEnabled, perfilDe, plataformasDe, PLATAFORMAS };
+module.exports = { requireAuth, requireAdmin, requirePlatform, requirePermission, isAdmin, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe, PLATAFORMAS };

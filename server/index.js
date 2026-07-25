@@ -10,7 +10,7 @@ const { computeMetrics } = require('./services/metrics');
 const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
 const chatStore = require('./services/chatStore');
-const { requireAuth, requireAdmin, requirePlatform, publicConfig, authEnabled, perfilDe, plataformasDe } = require('./services/auth');
+const { requireAuth, requireAdmin, requirePlatform, requirePermission, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe } = require('./services/auth');
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
 const ivr = require('./services/ivr');
@@ -60,7 +60,8 @@ app.get('/api/me', async (req, res) => {
     email: req.user ? req.user.email : null,
     isAdmin: req.user ? !!req.user.isAdmin : false,
     role: (p && p.role) || null,
-    platforms: plataformasDe(p && p.role, p && p.platforms)
+    platforms: plataformasDe(p && p.role, p && p.platforms),
+    permissions: req.user && req.user.isAdmin ? permisosDe({ role: 'admin' }) : permisosDe(p || {})
   });
 });
 
@@ -121,7 +122,7 @@ app.get('/api/data', async (req, res) => {
 });
 
 // Activar / desactivar clientes para el cron de llamadas (uno o varios).
-app.patch('/api/clientes/enabled', async (req, res) => {
+app.patch('/api/clientes/enabled', requirePermission('cobranzas.cliente_toggle'), async (req, res) => {
   try {
     const { phones, enabled } = req.body || {};
     if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
@@ -155,7 +156,7 @@ app.get('/api/analyze', async (req, res) => {
 });
 
 // Asistente: pregunta libre / proyección sobre los datos de la cartera.
-app.post('/api/ask', async (req, res) => {
+app.post('/api/ask', requirePermission('cobranzas.asistente'), async (req, res) => {
   try {
     const question = (req.body && req.body.question || '').toString().trim();
     if (!question) return res.status(400).json({ error: 'Falta la pregunta.' });
@@ -175,12 +176,12 @@ app.post('/api/ask', async (req, res) => {
 });
 
 // Historial del chat del Asistente (por usuario).
-app.get('/api/ask/history', async (req, res) => {
+app.get('/api/ask/history', requirePermission('cobranzas.asistente'), async (req, res) => {
   try { res.json({ thread: await chatStore.getThread(req.user && req.user.email) }); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.delete('/api/ask/history', async (req, res) => {
+app.delete('/api/ask/history', requirePermission('cobranzas.asistente'), async (req, res) => {
   try { await chatStore.clear(req.user && req.user.email); res.json({ ok: true }); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -206,7 +207,7 @@ app.post('/api/history/snapshot', async (req, res) => {
 
 // Lanza llamadas. 1 cliente = inmediata. Varios = se ENCOLAN (1 por minuto,
 // dentro del horario laboral). La cola vive en Supabase y sobrevive reinicios.
-app.post('/api/calls/trigger', async (req, res) => {
+app.post('/api/calls/trigger', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try {
     const { phones, origen } = req.body || {};
     if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
@@ -244,18 +245,18 @@ app.post('/api/calls/trigger', async (req, res) => {
 });
 
 // Estado de la cola de llamadas.
-app.get('/api/calls/queue', async (req, res) => {
+app.get('/api/calls/queue', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try { res.json(await queue.status()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Horario de llamadas (bloques) — configurado desde la UI.
-app.get('/api/calls/schedule', async (req, res) => {
+app.get('/api/calls/schedule', requirePermission('cobranzas.horario'), async (req, res) => {
   try { res.json(await schedule.get(true)); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/calls/schedule', async (req, res) => {
+app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (req, res) => {
   try {
     const b = req.body || {};
     const patch = {
@@ -282,7 +283,7 @@ app.get('/api/agents', async (req, res) => {
 });
 
 // Encola manualmente a los clientes activos ahora (sin esperar al bloque).
-app.post('/api/calls/enqueue-enabled', async (req, res) => {
+app.post('/api/calls/enqueue-enabled', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try {
     if (!calls.callsEnabled) return res.status(503).json({ error: 'Llamadas no configuradas (falta N8N_CALL_URL)' });
     const n = await queue.autoEnqueueEnabled();
@@ -305,25 +306,25 @@ app.post('/api/ivr/revisar', async (req, res) => {
 });
 
 // Promesas de pago: resumen (pendientes / cumplidas / incumplidas).
-app.get('/api/promesas', async (req, res) => {
+app.get('/api/promesas', requirePermission('cobranzas.promesas'), async (req, res) => {
   try { res.json(await promesas.resumen()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Fuerza la revisión de promesas ahora (útil para probar sin esperar al cron).
-app.post('/api/promesas/revisar', async (req, res) => {
+app.post('/api/promesas/revisar', requirePermission('cobranzas.promesas'), async (req, res) => {
   try { res.json(await revisarPromesas()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Cancelar todas las llamadas pendientes en la cola.
-app.delete('/api/calls/queue', async (req, res) => {
+app.delete('/api/calls/queue', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try { res.json(await queue.cancelarTodo()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Últimos disparos (para auditar qué se lanzó y cuándo).
-app.get('/api/calls/log', async (req, res) => {
+app.get('/api/calls/log', requirePermission('cobranzas.clientes'), async (req, res) => {
   try {
     const rows = await require('./services/supabaseDb')
       .select('llamada_disparo', '?select=*&order=created_at.desc&limit=100');
