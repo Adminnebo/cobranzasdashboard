@@ -16,6 +16,18 @@ const BASE = String(process.env.AGENT_API_BASE || 'https://app.swordaisolutions.
 const CLIENT_ID = String(process.env.AGENT_CLIENT_ID || '').trim();
 const API_KEY = String(process.env.AGENT_API_KEY || '').trim();
 
+// Lista blanca: como cotizaciones y cobranzas comparten la MISMA cuenta, aquí
+// se limita qué agentes se ven en cobranzas. Acepta IDs exactos o nombres
+// (coincidencia por texto, sin distinguir mayúsculas). Vacío = se muestran todos.
+const ALLOW = String(process.env.AGENT_ALLOW || '').split(',').map(s => s.trim()).filter(Boolean);
+const ALLOW_LC = ALLOW.map(s => s.toLowerCase());
+function permitido(a) {
+  if (!ALLOW.length) return true;
+  const id = String(a.id || '');
+  const name = String(a.name || '').toLowerCase();
+  return ALLOW.includes(id) || ALLOW_LC.some(x => name.includes(x));
+}
+
 const enabled = !!(CLIENT_ID && API_KEY);
 
 /** Lista de agentes + números. Devuelve { available, agents, phoneNumbers, error? }. */
@@ -34,7 +46,7 @@ async function list() {
   }
   return {
     available: true,
-    agents: (j.agents || []).map((a) => ({
+    agents: (j.agents || []).filter(permitido).map((a) => ({
       id: a.id,
       name: a.name || a.id,
       agentType: a.agentType || null,
