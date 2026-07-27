@@ -1,15 +1,19 @@
 // Mapeo intención -> color (escala de calidad de pago, mejor a peor) y etiqueta.
 // El color sigue a la entidad; el orden es semántico (verde=paga, rojo=no paga).
 export const INTENCION = {
+  ya_pago:          { label: 'Ya pagó',          color: 'var(--good)' },
   pago_inmediato:   { label: 'Pago inmediato',   color: 'var(--q-1)' },
   fecha_especifica: { label: 'Fecha específica', color: 'var(--q-2)' },
   negociacion:      { label: 'Negociación',      color: 'var(--q-3)' },
   proximo_corte:    { label: 'Próximo corte',    color: 'var(--q-3)' },
   promesa_vaga:     { label: 'Promesa vaga',     color: 'var(--q-4)' },
+  ninguno:          { label: 'Sin compromiso',   color: 'var(--q-4)' },
   no_contesta:      { label: 'No contesta',      color: 'var(--q-5)' },
+  evasivo:          { label: 'Evasivo',          color: 'var(--q-6)' },
   disputa:          { label: 'Disputa',          color: 'var(--q-6)' },
   sin_intencion:    { label: 'Sin intención',    color: 'var(--q-7)' },
   ivr:              { label: 'IVR / contestadora', color: 'var(--q-8)' },
+  sin_dato:         { label: 'Sin clasificar',   color: 'var(--q-8)' },
   no_contactado:    { label: 'No contactado',    color: 'var(--q-8)' },
 };
 

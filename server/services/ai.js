@@ -40,11 +40,16 @@ function buildPortfolio(clientes, llamadas) {
 
 // ── Heurística de respaldo (sin OpenAI) ─────────────────────────────────────
 const BASE_PROB = {
+  ya_pago: 99,
   pago_inmediato: 92,
   fecha_especifica: 78,
+  proximo_corte: 62,
   negociacion: 55,
   promesa_vaga: 38,
+  ninguno: 28,
+  sin_dato: 25,
   no_contesta: 22,
+  evasivo: 15,
   disputa: 18,
   sin_intencion: 8,
   no_contactado: 30,
