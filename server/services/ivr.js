@@ -1,117 +1,150 @@
 /**
- * Detección de IVR (contestadora / menú automático).
+ * Detección de "no se alcanzó a una persona" en dos categorías:
  *
- * Cuando una llamada cae en un IVR no hay a quién cobrarle: el cliente se marca
- * como `ivr` en cliente_config, se DESACTIVA (enabled=false) y queda excluido
- * del cron diario y de cualquier cola. Se puede reactivar a mano si consiguen
- * un mejor número.
+ *  - IVR de empresa (menú de opciones, "marque la extensión", central
+ *    telefónica): es PERMANENTE -> se marca y se desactiva de una.
+ *  - Buzón de voz (contestadora / se dejó mensaje): puede ser temporal ->
+ *    se reintenta hasta IVR_MAX_BUZON veces (buzones consecutivos) antes de
+ *    desactivar.
  *
- * El dato llega en el RESUMEN de la llamada (campo `notas`). También se acepta
- * que el agente mande directamente intencion_pago = 'ivr'.
+ * Al desactivar, el cliente queda enabled=false (no se le vuelve a llamar) y con
+ * ivr=true. El dato llega en el RESUMEN de la llamada (campo `notas`).
  */
 
 const db = require('./supabaseDb');
 
 const TABLE = 'cliente_config';
+const MAX_BUZON = parseInt(process.env.IVR_MAX_BUZON || '3', 10);
 
-// Patrones que delatan un IVR / contestadora en el resumen o la transcripción.
-const IVR_RE = new RegExp(
+// IVR de empresa: menú/extensión/central -> permanente.
+const IVR_EMPRESA_RE = new RegExp(
   [
     '\\bivr\\b',
-    'contestador',
-    'buz[oó]n',
     'men[uú]\\s*(de\\s*opciones|autom)',
-    'grabaci[oó]n\\s*autom',
-    'operadora?\\s*autom',
-    'respuesta\\s*autom',
-    'sistema\\s*autom',
+    'men[uú]\\s*automat',
     'marque\\s+(la\\s+)?(extensi[oó]n|opci[oó]n|n[uú]mero)',
-    'presione\\s+\\d',
-    'oprima\\s+\\d',
+    'presione\\s+\\d', 'oprima\\s+\\d',
     'central\\s*telef[oó]nica',
-    'no\\s*(contest[oó]|atendi[oó])\\s*una?\\s*persona',
-    'm[aá]quina\\s*contestadora',
+    'opci[oó]n\\s+de\\s+(contabilidad|ventas|soporte|cuentas)',
+    'sistema\\s*de\\s*opciones',
   ].join('|'),
   'i'
 );
 
-/** ¿Esta llamada cayó en un IVR? */
-function esIVR(ll) {
-  if (!ll) return false;
-  if (String(ll.intencion_pago || '').toLowerCase() === 'ivr') return true;
+// Buzón de voz / contestadora -> temporal (reintentable).
+const BUZON_RE = new RegExp(
+  [
+    'buz[oó]n',
+    'contestador',
+    'm[aá]quina\\s*contestadora',
+    'grabaci[oó]n\\s*(de\\s*mensajes|autom)',
+    'sistema\\s*autom[aá]tico',
+    'dej[oó]\\s*(un\\s*)?mensaje',
+    'se\\s*dej[oó]\\s*mensaje',
+    'voicemail',
+    'no\\s*fue\\s*atendida\\s*por\\s*una\\s*persona',
+    'no\\s*(contest[oó]|atendi[oó])\\s*una?\\s*persona',
+  ].join('|'),
+  'i'
+);
+
+/** Devuelve 'ivr' | 'buzon' | null para una llamada. */
+function tipoIVR(ll) {
+  if (!ll) return null;
+  const int = String(ll.intencion_pago || '').toLowerCase();
+  if (int === 'ivr') return 'ivr';
   const texto = `${ll.notas || ''}\n${ll.transcripcion || ''}`;
-  return IVR_RE.test(texto);
+  if (IVR_EMPRESA_RE.test(texto)) return 'ivr';
+  if (BUZON_RE.test(texto)) return 'buzon';
+  return null;
 }
 
-/** Extrae un fragmento del resumen como evidencia (para mostrar en el panel). */
+/** Compatibilidad: ¿la llamada cayó en IVR o buzón? */
+const esIVR = (ll) => tipoIVR(ll) !== null;
+
 function evidencia(ll) {
-  const notas = String(ll.notas || '');
-  const m = notas.match(IVR_RE);
-  if (m) {
-    const i = Math.max(0, notas.toLowerCase().indexOf(m[0].toLowerCase()) - 40);
-    return notas.slice(i, i + 160).trim();
-  }
-  return (notas || '').slice(0, 160) || 'Detectado en la transcripción';
+  const notas = String((ll && ll.notas) || '');
+  return notas.slice(0, 160) || 'Detectado en la transcripción';
 }
 
-/** Teléfonos ya marcados como IVR. */
 async function getIvrPhones() {
   const rows = await db.select(TABLE, '?select=phone&ivr=is.true');
   return new Set((rows || []).map((r) => String(r.phone)));
 }
 
-/** Map<phone, {ivr, ivr_at, ivr_detalle}> para el frontend. */
 async function getIvrMap() {
-  const rows = await db.select(TABLE, '?select=phone,ivr,ivr_at,ivr_detalle&ivr=is.true');
+  const rows = await db.select(TABLE, '?select=phone,ivr,ivr_tipo,ivr_at,ivr_detalle&ivr=is.true');
   const m = new Map();
-  for (const r of rows || []) m.set(String(r.phone), { at: r.ivr_at, detalle: r.ivr_detalle });
+  for (const r of rows || []) m.set(String(r.phone), { at: r.ivr_at, detalle: r.ivr_detalle, tipo: r.ivr_tipo });
   return m;
 }
 
 /**
- * Revisa las llamadas y marca como IVR (y desactiva) a los clientes que cayeron
- * en contestadora. Idempotente: no re-marca los que ya están.
+ * Recorre las llamadas y marca (desactivando) a los clientes que:
+ *  - cayeron en un IVR de empresa (una vez basta), o
+ *  - acumularon MAX_BUZON buzones consecutivos (los más recientes).
+ * Idempotente: se recalcula del historial, no re-marca los ya marcados.
  */
 async function sincronizar(llamadas) {
-  const detectados = llamadas.filter((ll) => ll.phone && esIVR(ll));
-  if (!detectados.length) return { detectados: 0, nuevos: 0 };
+  // Agrupa por teléfono, más recientes primero.
+  const byPhone = new Map();
+  for (const ll of llamadas) {
+    if (!ll.phone) continue;
+    if (!byPhone.has(ll.phone)) byPhone.set(ll.phone, []);
+    byPhone.get(ll.phone).push(ll);
+  }
+  for (const arr of byPhone.values()) arr.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
   const yaMarcados = await getIvrPhones();
+  const rows = [];
 
-  // Última llamada IVR por teléfono (por si hay varias).
-  const porTel = new Map();
-  for (const ll of detectados) {
-    if (yaMarcados.has(ll.phone)) continue;
-    const prev = porTel.get(ll.phone);
-    if (!prev || new Date(ll.created_at) > new Date(prev.created_at)) porTel.set(ll.phone, ll);
+  for (const [phone, calls] of byPhone) {
+    if (yaMarcados.has(phone)) continue;
+
+    // IVR de empresa en cualquier llamada -> permanente.
+    const empresa = calls.find((c) => tipoIVR(c) === 'ivr');
+    if (empresa) {
+      rows.push({ phone, tipo: 'ivr', detalle: evidencia(empresa), at: empresa.created_at });
+      continue;
+    }
+
+    // Racha de buzones consecutivos desde la llamada más reciente.
+    let streak = 0;
+    let last = null;
+    for (const c of calls) {
+      if (tipoIVR(c) === 'buzon') { streak++; if (!last) last = c; }
+      else break; // una llamada con persona corta la racha
+    }
+    if (streak >= MAX_BUZON) {
+      rows.push({ phone, tipo: 'buzon', detalle: `Buzón ${streak}x. ${evidencia(last)}`, at: last.created_at });
+    }
   }
-  if (!porTel.size) return { detectados: detectados.length, nuevos: 0 };
 
-  const rows = [...porTel.entries()].map(([phone, ll]) => ({
-    phone,
-    enabled: false,                       // <- se apaga: no se le llama más
+  if (!rows.length) return { detectados: 0, nuevos: 0 };
+
+  const payload = rows.map((r) => ({
+    phone: r.phone,
+    enabled: false,          // se apaga: no se le llama más
     ivr: true,
-    ivr_at: ll.created_at || new Date().toISOString(),
-    ivr_detalle: evidencia(ll),
+    ivr_tipo: r.tipo,        // 'ivr' | 'buzon'
+    ivr_at: r.at || new Date().toISOString(),
+    ivr_detalle: r.detalle,
     updated_at: new Date().toISOString(),
     updated_by: 'sistema (IVR)',
   }));
-
-  await db.upsert(TABLE, rows, 'phone');
-  console.log(`[ivr] ${rows.length} cliente(s) marcados como IVR y desactivados`);
-  return { detectados: detectados.length, nuevos: rows.length, phones: rows.map((r) => r.phone) };
+  await db.upsert(TABLE, payload, 'phone');
+  const nIvr = rows.filter((r) => r.tipo === 'ivr').length;
+  console.log(`[ivr] ${rows.length} marcados y desactivados (${nIvr} IVR empresa, ${rows.length - nIvr} buzón agotado)`);
+  return { detectados: rows.length, nuevos: rows.length, phones: rows.map((r) => r.phone) };
 }
 
-/** Quita la marca de IVR (para reactivar a mano si consiguen otro número). */
 async function desmarcar(phone) {
   await db.upsert(TABLE, {
     phone: String(phone),
-    ivr: false,
-    ivr_at: null,
-    ivr_detalle: null,
+    ivr: false, ivr_tipo: null, ivr_at: null, ivr_detalle: null,
     updated_at: new Date().toISOString(),
   }, 'phone');
   return { ok: true };
 }
 
-module.exports = { esIVR, sincronizar, getIvrPhones, getIvrMap, desmarcar };
+module.exports = { esIVR, tipoIVR, sincronizar, getIvrPhones, getIvrMap, desmarcar, MAX_BUZON };

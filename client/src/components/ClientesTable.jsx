@@ -416,7 +416,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                   <td>
                     {c.ivr ? (
                       <span className="ivr-badge" title={c.ivrDetalle || 'La llamada cayó en un IVR/contestadora'}>
-                        ☎ IVR
+                        ☎ {c.ivrTipo === 'buzon' ? 'Buzón' : 'IVR'}
                       </span>
                     ) : c.phone ? (
                       <button className={`switch ${c.enabled ? 'on' : ''}`} disabled={busy}

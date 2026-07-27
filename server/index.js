@@ -97,6 +97,7 @@ app.get('/api/data', async (req, res) => {
         ...c,
         enabled: enabledMap.get(c.phone) === true,
         ivr: !!i,
+        ivrTipo: i ? i.tipo : null,
         ivrDetalle: i ? i.detalle : null,
         ivrAt: i ? i.at : null,
         ultimaLlamada: ll
