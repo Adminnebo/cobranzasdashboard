@@ -61,4 +61,16 @@ const update = (table, query, patch) =>
     body: JSON.stringify(patch),
   });
 
-module.exports = { select, upsert, insert, update, dbEnabled, SUPABASE_URL };
+/** INSERT devolviendo la fila creada. */
+const insertReturn = (table, rows) =>
+  call(table, {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
+  });
+
+/** DELETE. Ej: del('call_list', '?id=eq.5') */
+const del = (table, query) =>
+  call(`${table}${query}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+
+module.exports = { select, upsert, insert, insertReturn, update, del, dbEnabled, SUPABASE_URL };

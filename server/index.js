@@ -13,6 +13,7 @@ const chatStore = require('./services/chatStore');
 const { requireAuth, requireAdmin, requirePlatform, requirePermission, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe } = require('./services/auth');
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
+const callLists = require('./services/callLists');
 const ivr = require('./services/ivr');
 const calls = require('./services/calls');
 const queue = require('./services/queue');
@@ -243,6 +244,27 @@ app.post('/api/calls/trigger', requirePermission('cobranzas.llamadas'), async (r
     console.error('[/api/calls/trigger]', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Listas de llamadas (segmentos guardados) ──
+app.get('/api/lists', requirePermission('cobranzas.llamadas'), async (req, res) => {
+  try { res.json({ lists: await callLists.list() }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/lists', requirePermission('cobranzas.llamadas'), async (req, res) => {
+  try {
+    const { name, phones } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Falta el nombre de la lista' });
+    if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'La lista no tiene clientes' });
+    const row = await callLists.create(String(name).trim(), phones, req.user ? req.user.email : null);
+    res.json({ ok: true, id: row && row.id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/lists/:id', requirePermission('cobranzas.llamadas'), async (req, res) => {
+  try { res.json(await callLists.remove(req.params.id)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Estado de la cola de llamadas.

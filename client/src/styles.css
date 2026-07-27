@@ -214,6 +214,19 @@ body {
 .cola-header .queue-panel { flex: 1; border-bottom: none; min-width: 260px; }
 .cola-header .sched-wrap { display: flex; align-items: center; padding: 8px 14px 8px 0; position: relative; }
 
+/* ── Listas de llamadas ── */
+.lists-wrap { display: flex; align-items: center; position: relative; }
+.lists-pop {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; width: 300px; max-height: 380px; overflow-y: auto;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: var(--shadow); padding: 14px;
+}
+.list-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.list-item:last-child { border-bottom: none; }
+.list-load { flex: 1; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 8px; border-radius: 8px; color: var(--text-primary); display: flex; flex-direction: column; gap: 2px; }
+.list-load:hover { background: var(--surface-2); }
+.list-meta { font-size: 0.74rem; color: var(--text-muted); }
+
 /* ── Horario de llamadas ── */
 .sched-btn { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .sched-btn.on { border-color: color-mix(in srgb, var(--good) 45%, transparent); }

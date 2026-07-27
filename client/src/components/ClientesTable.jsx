@@ -2,10 +2,11 @@ import { Fragment, useMemo, useState } from 'react';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, triggerCalls, resetIvr } from '../api';
+import { setClientesEnabled, triggerCalls, resetIvr, createList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
+import ListsPanel from './ListsPanel';
 import ClientCalls from './ClientCalls';
 
 const sortValue = {
@@ -220,6 +221,30 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
     });
   };
   const [queueKey, setQueueKey] = useState(0);
+  const [listsKey, setListsKey] = useState(0);
+
+  // Guardar un conjunto de teléfonos como lista reutilizable.
+  const guardarLista = async (phones) => {
+    const llamables = phones.filter(Boolean);
+    if (!llamables.length) { setMsg({ type: 'err', text: 'No hay clientes para guardar.' }); return; }
+    const name = window.prompt(`Nombre de la lista (${llamables.length} clientes):`);
+    if (!name || !name.trim()) return;
+    setBusy(true); setMsg(null);
+    try {
+      await createList(name.trim(), llamables);
+      setMsg({ type: 'ok', text: `Lista "${name.trim()}" guardada con ${llamables.length} cliente(s).` });
+      setListsKey((k) => k + 1);
+    } catch (e) { setMsg({ type: 'err', text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  // Cargar una lista: selecciona sus clientes (los que existen y son llamables hoy).
+  const cargarLista = (phones) => {
+    const set = new Set(phones.map(String));
+    const presentes = clientes.filter((c) => set.has(c.phone) && c.phone && !c.ivr).map((c) => c.phone);
+    setSel(new Set(presentes));
+    setMsg({ type: 'ok', text: `Lista cargada: ${presentes.length} de ${phones.length} seleccionados (se omiten sin teléfono / IVR).` });
+  };
 
   const selArr = [...sel];
   const caret = (k) => (k === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
@@ -233,6 +258,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
     <div>
       <div className="cola-header">
         <QueuePanel refreshKey={queueKey} />
+        <ListsPanel refreshKey={listsKey} onLoad={cargarLista} />
         <SchedulePanel onSaved={() => setQueueKey((k) => k + 1)} />
       </div>
 
@@ -355,6 +381,10 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
             onClick={() => setEnabled(llamablesFiltrados.map((c) => c.phone), false)}>
             Desactivar el grupo
           </button>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
+            onClick={() => guardarLista(llamablesFiltrados.map((c) => c.phone))}>
+            💾 Guardar como lista
+          </button>
         </div>
       )}
 
@@ -367,6 +397,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
           <button className="btn call-btn" disabled={busy} onClick={() => llamar(selArr)}>
             {busy ? 'Lanzando…' : `📞 Llamar a ${num(selArr.length)}`}
           </button>
+          <button className="mini-btn" disabled={busy} onClick={() => guardarLista(selArr)}>💾 Guardar como lista</button>
           <button className="mini-btn" onClick={() => setSel(new Set())}>Limpiar selección</button>
         </div>
       )}

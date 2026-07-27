@@ -72,6 +72,9 @@ export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trig
 export const fetchQueue = () => get('/api/calls/queue');
 export const cancelQueue = () => del('/api/calls/queue');
 export const resetIvr = (phone) => post(`/api/clientes/${phone}/ivr/reset`, {});
+export const fetchLists = () => get('/api/lists');
+export const createList = (name, phones) => post('/api/lists', { name, phones });
+export const deleteList = (id) => del(`/api/lists/${id}`);
 export const fetchSchedule = () => get('/api/calls/schedule');
 export const saveSchedule = (cfg) => put('/api/calls/schedule', cfg);
 // Agentes de voz disponibles (el servidor proxea el servicio; la key no viaja al navegador).
