@@ -390,10 +390,12 @@ app.listen(PORT, async () => {
   cron.schedule('0 16 * * *', () => history.takeSnapshot('PM').catch((e) => console.error('[cron PM]', e.message)), opts);
   console.log(`  Tomas programadas: 04:00 y 16:00 (${history.TZ})`);
 
-  // Worker de la cola: cada minuto saca UNA llamada (si estamos dentro de un
-  // bloque del horario configurado en la UI). También auto-encola a los activos
-  // 1x/día al entrar al primer bloque.
-  cron.schedule('* * * * *', () => queue.tick().catch((e) => console.error('[cola tick]', e.message)), opts);
+  // Worker de la cola: corre cada CALL_WORKER_INTERVAL_MS (default 15s). En cada
+  // tick, si hay cupo de concurrencia (consultando VAPI) y estamos dentro de un
+  // bloque del horario, lanza UNA llamada. Así llena los cupos rápido y mantiene
+  // hasta CALL_MAX_CONCURRENT simultáneas. También auto-encola a los activos 1x/día.
+  const WORKER_MS = parseInt(process.env.CALL_WORKER_INTERVAL_MS || '15000', 10);
+  setInterval(() => queue.tick().catch((e) => console.error('[cola tick]', e.message)), WORKER_MS);
 
   // IVR: cada 10 min revisa las llamadas nuevas y desactiva a los que cayeron
   // en contestadora (para que el cron de las 10 ya no los tome).
@@ -407,6 +409,7 @@ app.listen(PORT, async () => {
 
   const st = await queue.status().catch(() => null);
   console.log(`  Llamadas: ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}`);
+  console.log(`  Cola: modo ${st ? st.modo : 'n/d'}${st && st.modo === 'concurrencia' ? ` (máx. ${st.maxConcurrent} simultáneas, vía VAPI)` : ' (1 cada 60s, sin VAPI)'}`);
   console.log(`  Horario (configurable en la UI): ${st ? (st.scheduleEnabled ? st.horario : 'DESACTIVADO') : 'n/d'}${st ? ` · pendientes: ${st.pendientes}` : ''}\n`);
 });
 

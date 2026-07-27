@@ -19,10 +19,17 @@ const calls = require('./calls');
 const ivr = require('./ivr');
 const schedule = require('./schedule');
 const clienteConfig = require('./clienteConfig');
+const vapi = require('./vapi');
 const { getCachedData } = require('./cache');
 
 const TABLE = 'llamada_cola';
 const TZ = process.env.CRON_TZ || 'America/Santo_Domingo';
+
+// Concurrencia: máx. llamadas simultáneas (respetando el límite de VAPI).
+const MAX_CONCURRENT = parseInt(process.env.CALL_MAX_CONCURRENT || '8', 10);
+// Respaldo si VAPI no está configurado: 1 llamada cada RATE_MS.
+const RATE_MS = parseInt(process.env.CALL_RATE_MS || '60000', 10);
+let lastLaunchAt = 0;
 
 function horarioTexto(cfg) {
   const bloques = (cfg.blocks || []).map((b) => `${b.start}–${b.end}`).join(', ') || '—';
@@ -111,9 +118,21 @@ async function tick() {
       await schedule.markEnqueued();
     }
 
+    // ── Control de concurrencia ──
+    if (vapi.vapiEnabled) {
+      // Modo exacto: pregunta a VAPI cuántas hay activas; lanza solo si hay cupo.
+      const activas = await vapi.activeCalls();
+      if (activas === null) return;              // no se pudo consultar: no arriesgar
+      if (activas >= MAX_CONCURRENT) return;     // 8 activas: sin cupo, espera
+    } else {
+      // Respaldo sin VAPI: 1 llamada cada RATE_MS.
+      if (Date.now() - lastLaunchAt < RATE_MS) return;
+    }
+
     const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=created_at.asc&limit=1');
     const item = rows && rows[0];
     if (!item) return;
+    lastLaunchAt = Date.now();
 
     const cliente = {
       phone: item.phone,
@@ -159,6 +178,8 @@ async function status() {
   const pendientes = pend || [];
   const ultimas = hoy || [];
   const cfg = await schedule.get();
+  // Consulta las llamadas activas ahora (si VAPI está configurado).
+  const activas = vapi.vapiEnabled ? await vapi.activeCalls().catch(() => null) : null;
   return {
     pendientes: pendientes.length,
     proximo: pendientes[0] ? { phone: pendientes[0].phone, nombre: pendientes[0].nombre } : null,
@@ -167,7 +188,10 @@ async function status() {
     scheduleEnabled: cfg.enabled,
     enHorario: schedule.inWindow(cfg),
     horario: horarioTexto(cfg),
-    minutosEstimados: pendientes.length, // 1 por minuto
+    modo: vapi.vapiEnabled ? 'concurrencia' : 'ritmo',
+    maxConcurrent: MAX_CONCURRENT,
+    activas,                                  // llamadas en curso ahora (o null)
+    minutosEstimados: pendientes.length,      // aprox.
     activo: calls.callsEnabled,
   };
 }

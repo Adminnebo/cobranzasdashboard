@@ -36,12 +36,17 @@ export default function QueuePanel({ refreshKey }) {
           <>
             <strong>{num(q.pendientes)}</strong> en cola
             {q.enHorario
-              ? <> · llamando 1/min · faltan ~<strong>{eta}</strong></>
+              ? (q.modo === 'concurrencia'
+                  ? <> · <strong>{q.activas ?? '?'}/{q.maxConcurrent}</strong> activas</>
+                  : <> · 1/min · faltan ~<strong>{eta}</strong></>)
               : <> · <span className="queue-paused">pausada fuera de horario</span></>}
             {q.proximo && <> · siguiente: {q.proximo.nombre || q.proximo.phone}</>}
           </>
         ) : (
-          <>Cola vacía · {num(q.enviadas24h)} llamadas en 24h{q.errores24h ? ` · ${q.errores24h} con error` : ''}</>
+          <>
+            Cola vacía · {num(q.enviadas24h)} llamadas en 24h{q.errores24h ? ` · ${q.errores24h} con error` : ''}
+            {q.modo === 'concurrencia' && q.activas != null && <> · <strong>{q.activas}/{q.maxConcurrent}</strong> activas</>}
+          </>
         )}
       </span>
       <span className="queue-hours">🕘 {q.horario}</span>
