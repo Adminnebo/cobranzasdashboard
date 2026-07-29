@@ -14,7 +14,11 @@ const queue = require('./queue');
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 const MAX_CLIENTES = 1200; // tope para no disparar tokens
-const MAX_LLAMADAS = 500;
+const MAX_LLAMADAS = 250;
+// Presupuesto de caracteres del contexto para no pasar el límite del modelo
+// (gpt-4o-mini: 128k tokens). ~340k chars ≈ 97k tokens; deja margen para
+// system prompt + pregunta + respuesta.
+const MAX_CONTEXT_CHARS = parseInt(process.env.ASK_MAX_CONTEXT_CHARS || '340000', 10);
 
 const money = (n) => Math.round(n || 0).toLocaleString('es-MX');
 
@@ -23,9 +27,12 @@ const money = (n) => Math.round(n || 0).toLocaleString('es-MX');
 // para que pueda consultar TODOS los datos aunque la UI no los muestre.
 // Columnas a excluir del contexto del Asistente (ruido que encarece tokens).
 // Ej: ASK_EXCLUDE_COLS=FechaSync  -> ahorra ~11k tokens (~$0.0016) por pregunta.
-const EXCLUIDAS = new Set(
-  (process.env.ASK_EXCLUDE_COLS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-);
+// Ruido excluido por defecto (timestamps de sync únicos por fila) + lo que pongas
+// en ASK_EXCLUDE_COLS.
+const EXCLUIDAS = new Set([
+  'fechasync', 'fecha_sync', 'updated_at', 'created_at_sync',
+  ...(process.env.ASK_EXCLUDE_COLS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+]);
 
 const YA_MAPEADAS = new Set([
   'id', 'cliente_id', 'call_id', 'codigo', 'code',
@@ -147,29 +154,20 @@ function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap
     ? `Pendientes en cola: ${colaEstado.pendientes} · enviadas 24h: ${colaEstado.enviadas24h} · horario: ${colaEstado.horario} · ${colaEstado.scheduleEnabled ? 'ACTIVO' : 'desactivado'}`
     : '';
 
-  // Todas las llamadas (compactas, más recientes primero)
+  // Llamadas (compactas, más recientes primero; notas acotadas)
   const llamOrden = [...llamadas].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const llamTrunc = llamOrden.length > MAX_LLAMADAS;
   const llamadasCtx = llamOrden.slice(0, MAX_LLAMADAS)
     .map((l) => {
       const cli = clientByPhone.get(l.phone);
       const quien = cli ? cli.name : (l.name || '(sin cliente en cartera)');
-      return `${(l.created_at || '').slice(0, 16)} | tel ${l.phone} | cliente: ${quien} | ${l.intencion_pago} | fecha_pago "${l.fecha_pago || ''}" | ${l.notas || ''}${extras(l, exLla.varying)}`;
+      const notas = String(l.notas || '').slice(0, 120);
+      return `${(l.created_at || '').slice(0, 16)} | tel ${l.phone} | cliente: ${quien} | ${l.intencion_pago} | fecha_pago "${l.fecha_pago || ''}" | ${notas}${extras(l, exLla.varying)}`;
     })
     .join('\n');
 
-  // Clientes con TODO: deuda, estado enabled/ivr y su última llamada
-  const orden = [...clientes].sort((a, b) => (b.deuda_total || 0) - (a.deuda_total || 0));
-  const truncado = orden.length > MAX_CLIENTES;
-  const filas = orden.slice(0, MAX_CLIENTES).map((c) => {
-    const calls = callsByPhone.get(c.phone) || [];
-    const ult = calls[0];
-    const estado = ivrMap.has(c.phone) ? 'IVR' : enabledMap.get(c.phone) ? 'activo' : 'inactivo';
-    const ultTxt = ult ? ` | últ.llamada ${(ult.created_at || '').slice(0, 10)} ${ult.intencion_pago}${ult.fecha_pago ? ` (promete ${ult.fecha_pago})` : ''}` : ' | sin llamadas';
-    return `${c.name} | cód ${c.codigo || ''} | total ${money(c.deuda_total)} | vencido ${money(c.deuda_vencida)} | limite ${money(c.credito_ofrecido)} | tel ${c.phone} | email ${c.email || '-'} | ${estado} | ${calls.length} llamada(s)${ultTxt}${extras(c, exCli.varying)}`;
-  }).join('\n');
-
-  return [
+  // Secciones fijas (sin la lista de clientes).
+  const header = [
     `# RESUMEN DE CARTERA\n${resumen}`,
     `\n# INTENCIÓN DE PAGO (distribución)\n${intencion}`,
     `\n# SEVERIDAD DE DEUDA (por % vencido)\n${severidad}`,
@@ -177,8 +175,33 @@ function buildContext({ clientes, llamadas, metrics, history, enabledMap, ivrMap
     `\n# PROMESAS DE PAGO\n${promesasCtx}`,
     cola ? `\n# COLA DE LLAMADAS\n${cola}` : '',
     llamadasCtx ? `\n# LLAMADAS${llamTrunc ? ` (últimas ${MAX_LLAMADAS} de ${llamOrden.length})` : ''} ${constTxt(exLla.constantes)}\n${llamadasCtx}` : '',
-    `\n# CLIENTES (ordenados por deuda total, moneda DOP)${truncado ? ` — mostrando top ${MAX_CLIENTES} de ${orden.length}` : ''} ${constTxt(exCli.constantes)}\n${filas}`,
   ].filter(Boolean).join('\n');
+
+  // Clientes: ordenados por deuda; se incluyen tantos como quepan en el
+  // presupuesto de caracteres (los de mayor deuda primero).
+  const orden = [...clientes].sort((a, b) => (b.deuda_total || 0) - (a.deuda_total || 0));
+  const lineaDe = (c) => {
+    const calls = callsByPhone.get(c.phone) || [];
+    const ult = calls[0];
+    const estado = ivrMap.has(c.phone) ? 'IVR' : enabledMap.get(c.phone) ? 'activo' : 'inactivo';
+    const ultTxt = ult ? ` | últ.llamada ${(ult.created_at || '').slice(0, 10)} ${ult.intencion_pago}${ult.fecha_pago ? ` (promete ${ult.fecha_pago})` : ''}` : ' | sin llamadas';
+    return `${c.name} | cód ${c.codigo || ''} | total ${money(c.deuda_total)} | vencido ${money(c.deuda_vencida)} | limite ${money(c.credito_ofrecido)} | tel ${c.phone} | email ${c.email || '-'} | ${estado} | ${calls.length} llamada(s)${ultTxt}${extras(c, exCli.varying)}`;
+  };
+
+  let budget = MAX_CONTEXT_CHARS - header.length - 300;
+  const incluidas = [];
+  for (let i = 0; i < orden.length && i < MAX_CLIENTES; i++) {
+    const linea = lineaDe(orden[i]);
+    if (budget - linea.length - 1 < 0) break;
+    incluidas.push(linea);
+    budget -= linea.length + 1;
+  }
+  const truncado = incluidas.length < orden.length;
+  const notaTrunc = truncado
+    ? ` — mostrando los ${incluidas.length} de mayor deuda de ${orden.length} (los demás no caben en el contexto; usa los totales del resumen para el global)`
+    : '';
+
+  return `${header}\n\n# CLIENTES (ordenados por deuda total, moneda DOP)${notaTrunc} ${constTxt(exCli.constantes)}\n${incluidas.join('\n')}`;
 }
 
 async function ask(question) {
