@@ -96,6 +96,13 @@ body {
 .header h1 { font-size: 1.5rem; font-weight: 680; margin: 0 0 4px; letter-spacing: -0.01em; }
 .header .sub { color: var(--text-secondary); font-size: 0.9rem; }
 .badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* conmutador entre plataformas */
+.platsw { display: inline-flex; gap: 4px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
+.platsw__it { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); border-radius: 7px; text-decoration: none; white-space: nowrap; }
+.platsw__it:hover { background: var(--surface-2); color: var(--text-primary); }
+.platsw__it--on { background: var(--series-1, #2a78d6); color: #fff; }
+.platsw__it--on:hover { background: var(--series-1, #2a78d6); color: #fff; }
+.platsw__ic { font-size: 0.95rem; }
 .badge {
   font-size: 0.72rem; font-weight: 600; padding: 5px 10px; border-radius: 999px;
   border: 1px solid var(--border); color: var(--text-secondary); background: var(--surface-1);

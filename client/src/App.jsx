@@ -20,6 +20,13 @@ const TABS = [
   { id: 'asistente', label: 'Asistente IA', icon: '🤖', perm: 'cobranzas.asistente' },
 ];
 
+// Conmutador entre las 3 plataformas.
+const PLATS = [
+  { key: 'inbox', label: 'Conversaciones', icon: '💬', url: 'https://whatsapp.neboaiconsulting.com' },
+  { key: 'cotizaciones', label: 'Cotizaciones', icon: '📄', url: 'https://panelcotizaciones.neboaiconsulting.com' },
+  { key: 'cobranzas', label: 'Cobranzas', icon: '💰', url: 'https://panelcobranzas.neboaiconsulting.com' },
+];
+
 export default function App() {
   const { loading: authLoading, authed, enabled: authEnabled, user, signOut } = useAuth();
   const [tab, setTab] = useState('dashboard');
@@ -173,6 +180,13 @@ export default function App() {
         <div>
           <h1>Cobranzas IA · Panel de cartera</h1>
         </div>
+        <nav className="platsw" aria-label="Cambiar de plataforma">
+          {PLATS.filter((p) => p.key === 'cobranzas' || !me || !Array.isArray(me.platforms) || !me.platforms.length || me.platforms.includes(p.key)).map((p) => (
+            p.key === 'cobranzas'
+              ? <span key={p.key} className="platsw__it platsw__it--on" title="Estás aquí"><span className="platsw__ic">{p.icon}</span>{p.label}</span>
+              : <a key={p.key} className="platsw__it" href={p.url} title={`Ir a ${p.label}`}><span className="platsw__ic">{p.icon}</span>{p.label}</a>
+          ))}
+        </nav>
         <div className="badges">
           <span className="badge live"><span className="dot pulse" />En vivo · cada 60s</span>
           {lastUpdate && (
