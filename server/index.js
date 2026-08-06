@@ -23,8 +23,19 @@ const promesas = require('./services/promesas');
 const history = require('./services/history');
 
 const app = express();
+
+// ── Seguridad: cabeceras + rate limit ────────────────────────────────────────
+const { hardening, rateLimit } = require('./security');
+hardening(app);
 app.use(cors());
 app.use(express.json());
+
+// Rate limit por IP: health/config/recordings (máquina/audio) con límite alto;
+// el resto (panel) más estricto. Configurable por env.
+const esMaquinaCo = req => /^\/(health|config|recordings|hooks)/.test(req.path);
+const RL_WIN_CO = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
+app.use('/api', rateLimit({ windowMs: RL_WIN_CO, max: Number(process.env.RATE_LIMIT_MACHINE || 1200), skip: req => !esMaquinaCo(req) }));
+app.use('/api', rateLimit({ windowMs: RL_WIN_CO, max: Number(process.env.RATE_LIMIT_USER || 300), skip: esMaquinaCo }));
 
 const PORT = process.env.PORT || 3001;
 
@@ -119,7 +130,7 @@ app.get('/api/data', async (req, res) => {
     res.json({ source, clientes: conFlag, llamadas: llamadasSlim, metrics, cachedAt, cacheAgeMs });
   } catch (err) {
     console.error('[/api/data]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
@@ -133,7 +144,7 @@ app.patch('/api/clientes/enabled', requirePermission('cobranzas.cliente_toggle')
     res.json(out);
   } catch (err) {
     console.error('[/api/clientes/enabled]', err);
-    res.status(err.status || 500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
@@ -153,7 +164,7 @@ app.get('/api/analyze', async (req, res) => {
     res.json({ ...analysis, cached: false });
   } catch (err) {
     console.error('[/api/analyze]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
@@ -173,19 +184,19 @@ app.post('/api/ask', requirePermission('cobranzas.asistente'), async (req, res) 
     res.json(result);
   } catch (err) {
     console.error('[/api/ask]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
 // Historial del chat del Asistente (por usuario).
 app.get('/api/ask/history', requirePermission('cobranzas.asistente'), async (req, res) => {
   try { res.json({ thread: await chatStore.getThread(req.user && req.user.email) }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 app.delete('/api/ask/history', requirePermission('cobranzas.asistente'), async (req, res) => {
   try { await chatStore.clear(req.user && req.user.email); res.json({ ok: true }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Historial de deuda por día (agregado desde Supabase).
@@ -193,7 +204,7 @@ app.get('/api/history', async (req, res) => {
   try {
     res.json({ daily: await history.getDailyHistory(), tz: history.TZ });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
@@ -203,7 +214,7 @@ app.post('/api/history/snapshot', async (req, res) => {
     const snap = await history.takeSnapshot('manual');
     res.json(snap);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
@@ -242,14 +253,14 @@ app.post('/api/calls/trigger', requirePermission('cobranzas.llamadas'), async (r
     res.json({ ...r, encolado: true, enHorario: st.enHorario, horario: st.horario, minutosEstimados: st.minutosEstimados });
   } catch (err) {
     console.error('[/api/calls/trigger]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
 // ── Listas de llamadas (segmentos guardados) ──
 app.get('/api/lists', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try { res.json({ lists: await callLists.list() }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 app.post('/api/lists', requirePermission('cobranzas.llamadas'), async (req, res) => {
@@ -259,24 +270,24 @@ app.post('/api/lists', requirePermission('cobranzas.llamadas'), async (req, res)
     if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'La lista no tiene clientes' });
     const row = await callLists.create(String(name).trim(), phones, req.user ? req.user.email : null);
     res.json({ ok: true, id: row && row.id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 app.delete('/api/lists/:id', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try { res.json(await callLists.remove(req.params.id)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Estado de la cola de llamadas.
 app.get('/api/calls/queue', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try { res.json(await queue.status()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Horario de llamadas (bloques) — configurado desde la UI.
 app.get('/api/calls/schedule', requirePermission('cobranzas.horario'), async (req, res) => {
   try { res.json(await schedule.get(true)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (req, res) => {
@@ -294,7 +305,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
@@ -302,7 +313,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
 // servidor: la API key nunca sale al navegador.
 app.get('/api/agents', async (req, res) => {
   try { res.json(await agents.list()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Encola manualmente a los clientes activos ahora (sin esperar al bloque).
@@ -311,13 +322,13 @@ app.post('/api/calls/enqueue-enabled', requirePermission('cobranzas.llamadas'), 
     if (!calls.callsEnabled) return res.status(503).json({ error: 'Llamadas no configuradas (falta N8N_CALL_URL)' });
     const n = await queue.autoEnqueueEnabled();
     res.json({ encoladas: n });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Quita la marca de IVR (para reactivar a un cliente si consiguen otro número).
 app.post('/api/clientes/:phone/ivr/reset', async (req, res) => {
   try { res.json(await ivr.desmarcar(req.params.phone)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Fuerza la detección de IVR ahora (sin esperar al cron).
@@ -325,25 +336,25 @@ app.post('/api/ivr/revisar', async (req, res) => {
   try {
     const { llamadas } = await getCachedData(true);
     res.json(await ivr.sincronizar(llamadas));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Promesas de pago: resumen (pendientes / cumplidas / incumplidas).
 app.get('/api/promesas', requirePermission('cobranzas.promesas'), async (req, res) => {
   try { res.json(await promesas.resumen()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Fuerza la revisión de promesas ahora (útil para probar sin esperar al cron).
 app.post('/api/promesas/revisar', requirePermission('cobranzas.promesas'), async (req, res) => {
   try { res.json(await revisarPromesas()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Cancelar todas las llamadas pendientes en la cola.
 app.delete('/api/calls/queue', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try { res.json(await queue.cancelarTodo()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // Últimos disparos (para auditar qué se lanzó y cuándo).
@@ -353,14 +364,14 @@ app.get('/api/calls/log', requirePermission('cobranzas.clientes'), async (req, r
       .select('llamada_disparo', '?select=*&order=created_at.desc&limit=100');
     res.json({ disparos: rows || [] });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
 // ── Administración de usuarios (solo admins) ──
 app.get('/api/users', requireAdmin, async (req, res) => {
   try { res.json({ users: await users.listUsers() }); }
-  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+  catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 app.post('/api/users', requireAdmin, async (req, res) => {
@@ -369,12 +380,12 @@ app.post('/api/users', requireAdmin, async (req, res) => {
     if (!email || !password) return res.status(400).json({ error: 'Email y contraseña requeridos' });
     if (String(password).length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     res.json(await users.createUser({ email: String(email).trim(), password: String(password), admin: !!admin }));
-  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 app.patch('/api/users/:id', requireAdmin, async (req, res) => {
   try { res.json(await users.updateUser(req.params.id, req.body || {})); }
-  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+  catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 app.delete('/api/users/:id', requireAdmin, async (req, res) => {
@@ -382,7 +393,7 @@ app.delete('/api/users/:id', requireAdmin, async (req, res) => {
     // Evitar que un admin se borre a sí mismo.
     if (req.user && req.params.id === req.user.id) return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
     res.json(await users.deleteUser(req.params.id));
-  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
 // En producción, el mismo server sirve el build del cliente (SPA).
