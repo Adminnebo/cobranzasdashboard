@@ -30,12 +30,14 @@ hardening(app);
 app.use(cors());
 app.use(express.json());
 
-// Rate limit por IP: health/config/recordings (máquina/audio) con límite alto;
-// el resto (panel) más estricto. Configurable por env.
+// Rate limit por IP SOLO para el panel. Endpoints de máquina/audio (health,
+// config, recordings, hooks) EXENTOS.
 const esMaquinaCo = req => /^\/(health|config|recordings|hooks)/.test(req.path);
-const RL_WIN_CO = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
-app.use('/api', rateLimit({ windowMs: RL_WIN_CO, max: Number(process.env.RATE_LIMIT_MACHINE || 1200), skip: req => !esMaquinaCo(req) }));
-app.use('/api', rateLimit({ windowMs: RL_WIN_CO, max: Number(process.env.RATE_LIMIT_USER || 300), skip: esMaquinaCo }));
+app.use('/api', rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
+  max: Number(process.env.RATE_LIMIT_USER || 300),
+  skip: esMaquinaCo
+}));
 
 const PORT = process.env.PORT || 3001;
 
