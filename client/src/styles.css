@@ -309,6 +309,17 @@ body {
 .bulk-msg.ok { color: var(--good-ink); background: color-mix(in srgb, var(--good) 8%, transparent); }
 .bulk-msg.err { color: var(--critical); background: color-mix(in srgb, var(--critical) 8%, transparent); }
 tr.row-sel { background: color-mix(in srgb, var(--series-1) 8%, transparent); }
+tr.row-inlist td:first-child { box-shadow: inset 3px 0 0 var(--series-5); }
+tr.row-inlist { background: color-mix(in srgb, var(--series-5) 6%, transparent); }
+
+/* ── Barra de edición de lista ── */
+.listedit-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 11px 14px; background: color-mix(in srgb, var(--series-5) 12%, transparent);
+  border-bottom: 1px solid var(--grid);
+}
+.listedit-name { font-size: 0.85rem; color: var(--text-secondary); margin-right: auto; }
+.listedit-name strong { color: var(--text-primary); }
 tr.row-clickable { cursor: pointer; }
 tr.row-open { background: var(--surface-2); }
 tr.row-open td { border-bottom: none; }

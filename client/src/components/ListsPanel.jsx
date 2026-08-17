@@ -26,7 +26,7 @@ export default function ListsPanel({ refreshKey, onLoad }) {
     finally { setBusy(null); }
   };
 
-  const cargar = (l) => { onLoad(l.phones || []); setOpen(false); };
+  const cargar = (l) => { onLoad(l); setOpen(false); };
 
   const total = lists ? lists.length : 0;
 

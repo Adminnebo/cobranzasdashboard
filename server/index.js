@@ -275,6 +275,13 @@ app.post('/api/lists', requirePermission('cobranzas.llamadas'), async (req, res)
   } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
+app.put('/api/lists/:id', requirePermission('cobranzas.llamadas'), async (req, res) => {
+  try {
+    const { name, phones } = req.body || {};
+    res.json(await callLists.update(req.params.id, { name, phones }));
+  } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
 app.delete('/api/lists/:id', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try { res.json(await callLists.remove(req.params.id)); }
   catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }

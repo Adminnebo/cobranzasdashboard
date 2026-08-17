@@ -74,6 +74,7 @@ export const cancelQueue = () => del('/api/calls/queue');
 export const resetIvr = (phone) => post(`/api/clientes/${phone}/ivr/reset`, {});
 export const fetchLists = () => get('/api/lists');
 export const createList = (name, phones) => post('/api/lists', { name, phones });
+export const updateList = (id, payload) => put(`/api/lists/${id}`, payload);
 export const deleteList = (id) => del(`/api/lists/${id}`);
 export const fetchSchedule = () => get('/api/calls/schedule');
 export const saveSchedule = (cfg) => put('/api/calls/schedule', cfg);

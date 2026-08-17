@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, triggerCalls, resetIvr, createList } from '../api';
+import { setClientesEnabled, triggerCalls, resetIvr, createList, updateList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
@@ -159,7 +159,14 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
     });
   }, [filtered, sortKey, sortDir]);
 
-  const { slice, start, pager } = usePaged(sorted, 25);
+  // Con una lista activa, sus miembros se fijan arriba (para verificarlos).
+  const enLista = (c) => !!(activeList && activeList.phones.has(c.phone));
+  const ordenadas = useMemo(() => {
+    if (!activeList) return sorted;
+    return [...sorted.filter(enLista), ...sorted.filter((c) => !enLista(c))];
+  }, [sorted, activeList]);
+
+  const { slice, start, pager } = usePaged(ordenadas, 25);
 
   // Llamables = con teléfono y NO marcados como IVR.
   const llamablesFiltrados = useMemo(() => filtered.filter((c) => c.phone && !c.ivr), [filtered]);
@@ -222,6 +229,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
   };
   const [queueKey, setQueueKey] = useState(0);
   const [listsKey, setListsKey] = useState(0);
+  const [activeList, setActiveList] = useState(null); // { id, name, phones:Set } — lista en edición
 
   // Guardar un conjunto de teléfonos como lista reutilizable.
   const guardarLista = async (phones) => {
@@ -238,12 +246,40 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
     finally { setBusy(false); }
   };
 
-  // Cargar una lista: selecciona sus clientes (los que existen y son llamables hoy).
-  const cargarLista = (phones) => {
-    const set = new Set(phones.map(String));
-    const presentes = clientes.filter((c) => set.has(c.phone) && c.phone && !c.ivr).map((c) => c.phone);
-    setSel(new Set(presentes));
-    setMsg({ type: 'ok', text: `Lista cargada: ${presentes.length} de ${phones.length} seleccionados (se omiten sin teléfono / IVR).` });
+  // Cargar una lista para verificar/editar: sus clientes se fijan arriba.
+  const cargarLista = (list) => {
+    setSel(new Set());
+    setActiveList({ id: list.id, name: list.name, phones: new Set((list.phones || []).map(String)) });
+    setMsg({ type: 'ok', text: `Lista "${list.name}" cargada arriba (${(list.phones || []).length} clientes). Agrega o quita y se guarda sola.` });
+  };
+
+  // Guarda los teléfonos de la lista activa (misma lista, sin crear nuevas).
+  const persistList = async (phonesSet, okText) => {
+    if (!activeList) return;
+    setBusy(true);
+    try {
+      await updateList(activeList.id, { phones: [...phonesSet] });
+      setListsKey((k) => k + 1);
+      if (okText) setMsg({ type: 'ok', text: okText });
+    } catch (e) { setMsg({ type: 'err', text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const agregarALista = async (phones) => {
+    if (!activeList) return;
+    const next = new Set(activeList.phones);
+    const nuevos = phones.filter((p) => p && !next.has(p));
+    nuevos.forEach((p) => next.add(p));
+    setActiveList({ ...activeList, phones: next });
+    await persistList(next, `${nuevos.length} agregado(s) a "${activeList.name}".`);
+  };
+
+  const quitarDeLista = async (phone) => {
+    if (!activeList) return;
+    const next = new Set(activeList.phones);
+    next.delete(phone);
+    setActiveList({ ...activeList, phones: next });
+    await persistList(next, null);
   };
 
   const selArr = [...sel];
@@ -388,10 +424,30 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
         </div>
       )}
 
+      {/* Barra de edición de la lista activa */}
+      {activeList && (
+        <div className="listedit-bar">
+          <span className="listedit-name">📋 Editando lista: <strong>{activeList.name}</strong> · {num(activeList.phones.size)} cliente(s)</span>
+          {selArr.length > 0 && (
+            <button className="mini-btn" disabled={busy} onClick={() => agregarALista(selArr)}>
+              ➕ Agregar {num(selArr.length)} seleccionados
+            </button>
+          )}
+          <button className="btn call-btn" disabled={busy || !activeList.phones.size} onClick={() => llamar([...activeList.phones])}>
+            📞 Llamar a la lista ({num(activeList.phones.size)})
+          </button>
+          <button className="mini-btn" disabled={busy || !activeList.phones.size} onClick={() => setEnabled([...activeList.phones], true)}>Activar lista</button>
+          <button className="mini-btn" onClick={() => { setActiveList(null); setMsg(null); }}>Cerrar</button>
+        </div>
+      )}
+
       {/* Barra de acciones sobre la selección */}
       {selArr.length > 0 && (
         <div className="bulkbar">
           <span className="bulk-count">{num(selArr.length)} seleccionado(s)</span>
+          {activeList && (
+            <button className="mini-btn" disabled={busy} onClick={() => agregarALista(selArr)}>➕ A la lista</button>
+          )}
           <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, true)}>Activar</button>
           <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, false)}>Desactivar</button>
           <button className="btn call-btn" disabled={busy} onClick={() => llamar(selArr)}>
@@ -434,7 +490,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
               return (
                 <Fragment key={rowKey}>
                 <tr
-                  className={`${sel.has(c.phone) ? 'row-sel' : ''} ${c.ultimaLlamada ? 'row-clickable' : ''} ${abierta ? 'row-open' : ''}`}
+                  className={`${sel.has(c.phone) ? 'row-sel' : ''} ${c.ultimaLlamada ? 'row-clickable' : ''} ${abierta ? 'row-open' : ''} ${enLista(c) ? 'row-inlist' : ''}`}
                   onClick={(e) => {
                     // No desplegar si el click fue en un control (checkbox, switch, botón, link).
                     if (e.target.closest('button, input, a, label')) return;
@@ -494,17 +550,26 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                     )}
                   </td>
                   <td>
-                    {c.ivr ? (
-                      <button className="mini-btn" disabled={busy}
-                        title="Quita la marca de IVR y permite volver a llamarlo (útil si consiguieron otro número)"
-                        onClick={() => run(() => resetIvr(c.phone), 'Marca de IVR quitada. Ya se puede volver a llamar.')}>
-                        ↺ Reactivar
-                      </button>
-                    ) : (
-                      <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
-                        📞 Llamar ahora
-                      </button>
-                    )}
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      {c.ivr ? (
+                        <button className="mini-btn" disabled={busy}
+                          title="Quita la marca de IVR y permite volver a llamarlo (útil si consiguieron otro número)"
+                          onClick={() => run(() => resetIvr(c.phone), 'Marca de IVR quitada. Ya se puede volver a llamar.')}>
+                          ↺ Reactivar
+                        </button>
+                      ) : (
+                        <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
+                          📞 Llamar
+                        </button>
+                      )}
+                      {activeList && c.phone && (
+                        enLista(c) ? (
+                          <button className="mini-btn danger" disabled={busy} title="Quitar de la lista" onClick={() => quitarDeLista(c.phone)}>✕ lista</button>
+                        ) : (
+                          <button className="mini-btn" disabled={busy || c.ivr} title="Agregar a la lista" onClick={() => agregarALista([c.phone])}>➕ lista</button>
+                        )
+                      )}
+                    </div>
                   </td>
                 </tr>
                 {abierta && (

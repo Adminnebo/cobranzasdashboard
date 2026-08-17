@@ -29,9 +29,18 @@ async function create(name, phones, by) {
   return rows && rows[0];
 }
 
+async function update(id, { name, phones }) {
+  const patch = {};
+  if (typeof name === 'string' && name.trim()) patch.name = name.trim().slice(0, 120);
+  if (Array.isArray(phones)) patch.phones = [...new Set(phones.map(String).filter(Boolean))];
+  if (!Object.keys(patch).length) return { ok: true };
+  await db.update(TABLE, `?id=eq.${encodeURIComponent(id)}`, patch);
+  return { ok: true };
+}
+
 async function remove(id) {
   await db.del(TABLE, `?id=eq.${encodeURIComponent(id)}`);
   return { ok: true };
 }
 
-module.exports = { list, create, remove };
+module.exports = { list, create, update, remove };
