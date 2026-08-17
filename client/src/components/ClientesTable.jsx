@@ -159,14 +159,16 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
     });
   }, [filtered, sortKey, sortDir]);
 
-  // Con una lista activa, sus miembros se fijan arriba (para verificarlos).
+  // Con una lista activa: por defecto muestra SOLO sus contactos. Si activas
+  // "ver todos" (para agregar), muestra todos con los de la lista fijados arriba.
   const enLista = (c) => !!(activeList && activeList.phones.has(c.phone));
-  const ordenadas = useMemo(() => {
+  const visibles = useMemo(() => {
     if (!activeList) return sorted;
+    if (!listVerTodos) return sorted.filter(enLista);
     return [...sorted.filter(enLista), ...sorted.filter((c) => !enLista(c))];
-  }, [sorted, activeList]);
+  }, [sorted, activeList, listVerTodos]);
 
-  const { slice, start, pager } = usePaged(ordenadas, 25);
+  const { slice, start, pager } = usePaged(visibles, 25);
 
   // Llamables = con teléfono y NO marcados como IVR.
   const llamablesFiltrados = useMemo(() => filtered.filter((c) => c.phone && !c.ivr), [filtered]);
@@ -230,6 +232,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
   const [queueKey, setQueueKey] = useState(0);
   const [listsKey, setListsKey] = useState(0);
   const [activeList, setActiveList] = useState(null); // { id, name, phones:Set } — lista en edición
+  const [listVerTodos, setListVerTodos] = useState(false); // en lista: ver todos (para agregar) vs solo la lista
 
   // Guardar un conjunto de teléfonos como lista reutilizable.
   const guardarLista = async (phones) => {
@@ -249,8 +252,9 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
   // Cargar una lista para verificar/editar: sus clientes se fijan arriba.
   const cargarLista = (list) => {
     setSel(new Set());
+    setListVerTodos(false); // arranca mostrando SOLO los contactos de la lista
     setActiveList({ id: list.id, name: list.name, phones: new Set((list.phones || []).map(String)) });
-    setMsg({ type: 'ok', text: `Lista "${list.name}" cargada arriba (${(list.phones || []).length} clientes). Agrega o quita y se guarda sola.` });
+    setMsg({ type: 'ok', text: `Lista "${list.name}": ${(list.phones || []).length} contactos. Agrega o quita y se guarda sola.` });
   };
 
   // Guarda los teléfonos de la lista activa (misma lista, sin crear nuevas).
@@ -427,17 +431,20 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
       {/* Barra de edición de la lista activa */}
       {activeList && (
         <div className="listedit-bar">
-          <span className="listedit-name">📋 Editando lista: <strong>{activeList.name}</strong> · {num(activeList.phones.size)} cliente(s)</span>
+          <span className="listedit-name">📋 Lista: <strong>{activeList.name}</strong> · {num(activeList.phones.size)} contacto(s){listVerTodos ? ' · viendo todos para agregar' : ''}</span>
+          <button className={`mini-btn ${listVerTodos ? 'active' : ''}`} onClick={() => setListVerTodos((v) => !v)}>
+            {listVerTodos ? '↩ Ver solo la lista' : '➕ Ver todos para agregar'}
+          </button>
           {selArr.length > 0 && (
             <button className="mini-btn" disabled={busy} onClick={() => agregarALista(selArr)}>
-              ➕ Agregar {num(selArr.length)} seleccionados
+              Agregar {num(selArr.length)} seleccionados
             </button>
           )}
           <button className="btn call-btn" disabled={busy || !activeList.phones.size} onClick={() => llamar([...activeList.phones])}>
             📞 Llamar a la lista ({num(activeList.phones.size)})
           </button>
           <button className="mini-btn" disabled={busy || !activeList.phones.size} onClick={() => setEnabled([...activeList.phones], true)}>Activar lista</button>
-          <button className="mini-btn" onClick={() => { setActiveList(null); setMsg(null); }}>Cerrar</button>
+          <button className="mini-btn" onClick={() => { setActiveList(null); setListVerTodos(false); setMsg(null); }}>Cerrar</button>
         </div>
       )}
 
