@@ -215,6 +215,12 @@ body {
   color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); cursor: help;
 }
+/* Buzón (voicemail) = ámbar (temporal, reintentable) — es el color base.
+   IVR de empresa = rojo (permanente, más severo). */
+.ivr-badge--ivr {
+  color: var(--critical); background: color-mix(in srgb, var(--critical) 14%, transparent);
+  border-color: color-mix(in srgb, var(--critical) 35%, transparent);
+}
 
 /* ── Header: cola (izq) + horario (der) ── */
 .cola-header { display: flex; align-items: stretch; gap: 10px; border-bottom: 1px solid var(--grid); flex-wrap: wrap; }

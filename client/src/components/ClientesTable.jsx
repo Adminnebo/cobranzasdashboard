@@ -97,6 +97,8 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
       if (f.estado === 'activos' && !c.enabled) return false;
       if (f.estado === 'inactivos' && c.enabled) return false;
       if (f.estado === 'ivr' && !c.ivr) return false;
+      if (f.estado === 'ivr_empresa' && !(c.ivr && c.ivrTipo !== 'buzon')) return false;
+      if (f.estado === 'buzon' && !(c.ivr && c.ivrTipo === 'buzon')) return false;
       if (f.estado === 'sin_ivr' && c.ivr) return false;
       if (f.soloLlamables && (!c.phone || c.ivr)) return false;
 
@@ -137,7 +139,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
         c.name, c.empresa, c.codigo, c.email, c.phone,
         c.deuda_total, c.deuda_vencida, c.credito_ofrecido,
         ll && intencionLabel(ll.intencion), ll && ll.fechaPago, ll && ll.notas,
-        c.ivr ? 'ivr contestadora' : '', c.enabled ? 'activo' : 'inactivo',
+        c.ivr ? (c.ivrTipo === 'buzon' ? 'buzon voicemail contestadora' : 'ivr empresa central menu') : '', c.enabled ? 'activo' : 'inactivo',
       ].filter((x) => x !== null && x !== undefined && x !== '').join(' ').toLowerCase();
 
       if (hay.includes(t)) return true;
@@ -309,8 +311,10 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
           <option value="todos">Todos los estados</option>
           <option value="activos">Solo activos</option>
           <option value="inactivos">Solo inactivos</option>
-          <option value="ivr">Solo IVR / contestadora</option>
-          <option value="sin_ivr">Excluir IVR</option>
+          <option value="ivr">IVR y Buzón (todos)</option>
+          <option value="ivr_empresa">Solo IVR (empresa)</option>
+          <option value="buzon">Solo Buzón (voicemail)</option>
+          <option value="sin_ivr">Excluir IVR / Buzón</option>
         </select>
         <select className="search select" value={f.intencion} onChange={(e) => setFilter('intencion', e.target.value)}>
           <option value="">Cualquier última llamada</option>
@@ -341,7 +345,8 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
             <button className="chip sm" onClick={() => applyPreset({ intencion: 'no_contactado', soloLlamables: true })}>Nunca llamados</button>
             <button className="chip sm" onClick={() => applyPreset({ diasSinContacto: '7', soloLlamables: true }, { key: 'ultima', dir: 'asc' })}>Sin contacto 7d+</button>
             <button className="chip sm" onClick={() => applyPreset({ conPromesa: true, soloLlamables: true }, { key: 'ultima', dir: 'desc' })}>Con promesa</button>
-            <button className="chip sm" onClick={() => applyPreset({ estado: 'ivr' })}>☎ Solo IVR</button>
+            <button className="chip sm" onClick={() => applyPreset({ estado: 'ivr_empresa' })}>🏢 IVR</button>
+            <button className="chip sm" onClick={() => applyPreset({ estado: 'buzon' })}>📮 Buzón</button>
             <button className="chip sm danger" onClick={() => { setF(EMPTY_FILTERS); setQ(''); }}>✕ Limpiar</button>
           </div>
 
@@ -407,7 +412,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
         <div className="group-bar">
           <span className="group-count">
             <strong>{num(filtered.length)}</strong> coinciden · <strong>{num(llamablesFiltrados.length)}</strong> llamables
-            {ivrEnGrupo > 0 && <> · <span style={{ color: 'var(--warning)' }}>{num(ivrEnGrupo)} IVR excluidos</span></>}
+            {ivrEnGrupo > 0 && <> · <span style={{ color: 'var(--warning)' }}>{num(ivrEnGrupo)} IVR/Buzón excluidos</span></>}
             {' · '}vencido del grupo: <strong>{money(filtered.reduce((s, c) => s + (c.deuda_vencida || 0), 0))}</strong>
           </span>
           <button className="mini-btn" disabled={busy || !llamablesFiltrados.length} onClick={selectAllFiltered}>
@@ -509,8 +514,11 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                   </td>
                   <td>
                     {c.ivr ? (
-                      <span className="ivr-badge" title={c.ivrDetalle || 'La llamada cayó en un IVR/contestadora'}>
-                        ☎ {c.ivrTipo === 'buzon' ? 'Buzón' : 'IVR'}
+                      <span className={`ivr-badge ${c.ivrTipo === 'buzon' ? 'ivr-badge--buzon' : 'ivr-badge--ivr'}`}
+                        title={c.ivrTipo === 'buzon'
+                          ? `Buzón de voz (temporal, reintentable). ${c.ivrDetalle || ''}`
+                          : `IVR de empresa / central (permanente). ${c.ivrDetalle || ''}`}>
+                        {c.ivrTipo === 'buzon' ? '📮 Buzón' : '🏢 IVR'}
                       </span>
                     ) : c.phone ? (
                       <button className={`switch ${c.enabled ? 'on' : ''}`} disabled={busy}
