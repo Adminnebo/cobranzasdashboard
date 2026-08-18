@@ -161,6 +161,12 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
     });
   }, [filtered, sortKey, sortDir]);
 
+  // Estado de la lista activa. DEBE declararse antes de los useMemo que lo usan
+  // (`visibles`): con const, usarlo antes de esta línea da un ReferenceError de
+  // TDZ que tumba todo el render (pantalla en negro).
+  const [activeList, setActiveList] = useState(null);      // { id, name, phones:Set } — lista en edición
+  const [listVerTodos, setListVerTodos] = useState(false); // en lista: ver todos (para agregar) vs solo la lista
+
   // Con una lista activa: por defecto muestra SOLO sus contactos. Si activas
   // "ver todos" (para agregar), muestra todos con los de la lista fijados arriba.
   const enLista = (c) => !!(activeList && activeList.phones.has(c.phone));
@@ -233,8 +239,6 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
   };
   const [queueKey, setQueueKey] = useState(0);
   const [listsKey, setListsKey] = useState(0);
-  const [activeList, setActiveList] = useState(null); // { id, name, phones:Set } — lista en edición
-  const [listVerTodos, setListVerTodos] = useState(false); // en lista: ver todos (para agregar) vs solo la lista
 
   // Guardar un conjunto de teléfonos como lista reutilizable.
   const guardarLista = async (phones) => {
