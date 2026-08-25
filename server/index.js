@@ -235,8 +235,10 @@ app.post('/api/calls/trigger', requirePermission('cobranzas.llamadas'), async (r
 
     const por = req.user ? req.user.email : null;
 
-    // Los marcados como IVR no se llaman nunca (ni siquiera a mano).
-    const ivrPhones = await ivr.getIvrPhones();
+    // Los marcados como IVR se excluyen del BULK/cron automáticamente. A mano
+    // (origen 'manual') SÍ se permiten: es una decisión explícita del agente.
+    const esManual = origen === 'manual';
+    const ivrPhones = esManual ? new Set() : await ivr.getIvrPhones();
     const permitidos = objetivo.filter((c) => !ivrPhones.has(c.phone));
     const omitidosIvr = objetivo.length - permitidos.length;
     if (!permitidos.length) {
