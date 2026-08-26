@@ -1,0 +1,645 @@
+/* =========================================================
+   tickets-widget.js — Widget de tickets PORTABLE (mismo sistema del inbox).
+   Habla con el backend del inbox (apiBase + /api/tickets) usando el token
+   Supabase del panel host. Inyecta su propio modal + estilos, así funciona
+   igual en cualquier panel (cotizaciones, cobranzas, …).
+
+   Uso:
+     <link rel="stylesheet" href="tickets-widget.css">
+     <script src="tickets-widget.js"></script>
+     TicketsWidget.init({
+       apiBase: 'https://whatsapp.neboaiconsulting.com',   // backend del inbox
+       getToken: () => miTokenSupabase,                    // Bearer del panel
+       getUser: () => ({ email, name, role }),             // opcional (atribución)
+       button: '#miBotonTickets'   // opcional: si no, crea uno flotante. false = ninguno
+     });
+   Luego TicketsWidget.open() abre el modal.
+   ========================================================= */
+(function (global) {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // Config + helpers (token / toast / base del API). Se resuelven en runtime.
+  const TKW = {
+    api: '',
+    getToken: null,
+    getUser: null,
+    token() { try { return this.getToken ? this.getToken() : ((global.Auth && global.Auth.currentToken) || null); } catch (_) { return null; } },
+    toast(msg) {
+      if (global.UI && typeof global.UI.toast === 'function') return global.UI.toast(msg);
+      let el = document.getElementById('tkwToast');
+      if (!el) { el = document.createElement('div'); el.id = 'tkwToast'; el.className = 'tkw-toast'; document.body.appendChild(el); }
+      el.textContent = msg; el.classList.add('tkw-toast--on');
+      clearTimeout(this._tt); this._tt = setTimeout(() => el.classList.remove('tkw-toast--on'), 3200);
+    }
+  };
+
+  const PRIORIDADES = [
+    { v: 'baja', t: 'Baja' },
+    { v: 'media', t: 'Media' },
+    { v: 'alta', t: 'Alta' },
+    { v: 'urgente', t: 'Urgente' }
+  ];
+  const CATEGORIAS = ['Error / falla', 'Solicitud', 'Nuevo desarrollo', 'Duda', 'Facturación', 'Otro'];
+
+  const MAX_ARCHIVOS = 5;
+  const MAX_BYTES = 10 * 1024 * 1024;
+  const peso = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  const iconoDe = m => /^image\//.test(m || '') ? '🖼️' : /pdf/.test(m || '') ? '📕' : /^video\//.test(m || '') ? '🎬' : /^audio\//.test(m || '') ? '🎵' : '📎';
+  // Estrellas de calificación. editable=true → clicables (para el autor).
+  const estrellasHtml = (rating, editable, id) => {
+    const r = Number(rating) || 0;
+    let s = `<div class="tkstars${editable ? ' tkstars--edit' : ''}"${editable ? ` data-tkrate="${esc(id)}"` : ''}>`;
+    for (let i = 1; i <= 5; i++) s += `<span class="tkstar${i <= r ? ' tkstar--on' : ''}"${editable ? ` data-star="${i}"` : ''}>★</span>`;
+    return s + '</div>';
+  };
+  const esImagen = m => /^image\//.test(m || '');
+
+  // Estado (etiqueta + clase), prioridad (etiqueta) y fechas — compartidos por lista y detalle.
+  const EST = { nuevo: ['Nuevo', 'nuevo'], en_progreso: ['En progreso', 'prog'], esperando_cliente: ['Esperando cliente', 'espera'], completado: ['✓ Completado', 'ok'] };
+  const ESTADOS = ['nuevo', 'en_progreso', 'esperando_cliente', 'completado'];
+  const PRI = { baja: 'Baja', media: 'Media', alta: 'Alta', urgente: 'Urgente' };
+  const FILTROS = [['todos', 'Todos'], ['nuevo', 'Nuevos'], ['en_progreso', 'En progreso'], ['esperando_cliente', 'Esperando cliente'], ['completado', 'Completados']];
+  const fechaCorta = ms => ms ? new Date(ms).toLocaleDateString('es-DO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const fechaLarga = ms => ms ? new Date(ms).toLocaleString('es-DO', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+
+  const Tickets = {
+    adjuntos: [],       // archivos elegidos para el ticket que se está redactando
+    _tickets: [],       // últimos tickets cargados
+    _admin: false,
+    _scope: 'mios',     // 'mios' | 'todos' (solo admin puede ver todos)
+    _filtro: 'todos',   // filtro de estado
+    _prio: 'todas',     // filtro de prioridad
+    _cat: 'todas',      // filtro de categoría
+    _dias: 'todo',      // filtro de fecha
+    _orden: 'recientes',// orden
+    _busca: '',         // texto de búsqueda
+
+    async quien() {
+      // Datos del usuario para atribución. El backend igual deriva el user del
+      // token; esto es solo un extra. getUser puede ser sync u opcional.
+      try {
+        if (TKW.getUser) {
+          const u = await TKW.getUser();
+          if (u) return { email: u.email || null, name: u.name || (u.profile && u.profile.full_name) || null, role: u.role || (u.profile && u.profile.role) || null };
+        }
+      } catch (_) {}
+      return { email: null, name: null, role: null };
+    },
+
+    abrir() {
+      $('#ticketsModal').hidden = false;
+      this.verNuevo();
+    },
+    cerrar() { $('#ticketsModal').hidden = true; },
+
+    verNuevo() {
+      document.querySelectorAll('.tk__tab').forEach(t => t.classList.toggle('tk__tab--on', t.dataset.tkview === 'nuevo'));
+      $('#ticketList').hidden = true;
+      $('#ticketOk').hidden = true;
+      $('#ticketForm').hidden = false;
+      this.adjuntos = [];              // formulario limpio: también los adjuntos
+      this.pintarForm();
+    },
+
+    async verLista() {
+      document.querySelectorAll('.tk__tab').forEach(t => t.classList.toggle('tk__tab--on', t.dataset.tkview === 'lista'));
+      $('#ticketForm').hidden = true;
+      $('#ticketOk').hidden = true;
+      const box = $('#ticketList');
+      box.hidden = false;
+      box.innerHTML = '<p class="tk__cargando">Cargando…</p>';
+      try {
+        const h = {}; { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+        // Por defecto el backend devuelve solo los míos; un admin puede pedir todos.
+        const url = TKW.api + '/api/tickets' + (this._scope === 'todos' ? '?scope=all' : '');
+        const d = await (await fetch(url, { headers: h })).json();
+        this._tickets = d.tickets || [];
+        this._admin = !!d.admin;
+        this._super = !!d.super;
+        this.pintarLista();
+      } catch (e) {
+        box.innerHTML = `<p class="tk__err">No se pudieron cargar: ${esc(e.message)}</p>`;
+      }
+    },
+
+    // Barra (toggle admin + filtros de estado + buscador + selects) y filas.
+    pintarLista() {
+      const box = $('#ticketList');
+      const cont = { todos: this._tickets.length, nuevo: 0, en_progreso: 0, esperando_cliente: 0, completado: 0 };
+      this._tickets.forEach(t => { if (cont[t.status] != null) cont[t.status]++; });
+      const chips = FILTROS.map(([k, lbl]) =>
+        `<button class="tkfil ${this._filtro === k ? 'tkfil--on' : ''}" data-tkfiltro="${k}">${lbl}<span class="tkfil__n">${cont[k]}</span></button>`).join('');
+      // Interruptor Míos / Todos, solo para admin/super_admin.
+      const scope = this._admin ? `
+        <div class="tkscope">
+          <button class="tkscope__b ${this._scope === 'mios' ? 'tkscope__b--on' : ''}" data-tkscope="mios">Míos</button>
+          <button class="tkscope__b ${this._scope === 'todos' ? 'tkscope__b--on' : ''}" data-tkscope="todos">Todos</button>
+        </div>` : '';
+      const opt = (v, l, sel) => `<option value="${esc(v)}" ${sel === v ? 'selected' : ''}>${esc(l)}</option>`;
+      const selPrio = `<select id="tkPrio" class="tksel">${opt('todas', 'Prioridad: todas', this._prio)}${PRIORIDADES.map(p => opt(p.v, p.t, this._prio)).join('')}</select>`;
+      const selCat = `<select id="tkCat" class="tksel">${opt('todas', 'Categoría: todas', this._cat)}${CATEGORIAS.map(c => opt(c, c, this._cat)).join('')}</select>`;
+      const selDias = `<select id="tkDias" class="tksel">${[['todo', 'Fecha: todo'], ['hoy', 'Hoy'], ['7', 'Últimos 7 días'], ['30', 'Últimos 30 días']].map(([v, l]) => opt(v, l, this._dias)).join('')}</select>`;
+      const selOrden = `<select id="tkOrden" class="tksel">${[['recientes', 'Orden: recientes'], ['antiguos', 'Orden: antiguos'], ['prioridad', 'Orden: prioridad']].map(([v, l]) => opt(v, l, this._orden)).join('')}</select>`;
+      box.innerHTML = `
+        <div class="tklist__bar">
+          ${scope}
+          <div class="tkfils">${chips}</div>
+          <div class="tksearch">
+            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+            <input id="tkBuscar" class="tksearch__inp" type="text" placeholder="Buscar por asunto o descripción…" value="${esc(this._busca)}" />
+          </div>
+          <div class="tkfilters">${selPrio}${selCat}${selDias}${selOrden}</div>
+        </div>
+        <div class="tklist" id="tkItems"></div>`;
+      this.pintarItems();
+    },
+
+    pintarItems() {
+      const cont = $('#tkItems');
+      if (!cont) return;
+      const q = this._busca.trim().toLowerCase();
+      const ahora = Date.now();
+      const corte = this._dias === 'hoy' ? new Date().setHours(0, 0, 0, 0)
+        : this._dias === '7' ? ahora - 7 * 864e5
+        : this._dias === '30' ? ahora - 30 * 864e5 : 0;
+      const ORD = { urgente: 0, alta: 1, media: 2, baja: 3 };
+      let items = this._tickets.filter(t =>
+        (this._filtro === 'todos' || t.status === this._filtro) &&
+        (this._prio === 'todas' || (t.priority || 'media') === this._prio) &&
+        (this._cat === 'todas' || t.category === this._cat) &&
+        (!corte || (t.createdAt || 0) >= corte));
+      if (q) items = items.filter(t =>
+        (t.title || '').toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q) ||
+        (t.userEmail || '').toLowerCase().includes(q));
+      items = items.slice().sort((a, b) => {
+        if (this._orden === 'antiguos') return (a.createdAt || 0) - (b.createdAt || 0);
+        if (this._orden === 'prioridad') {
+          const d = (ORD[a.priority] ?? 2) - (ORD[b.priority] ?? 2);
+          return d || (b.createdAt || 0) - (a.createdAt || 0);
+        }
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      });
+      if (!items.length) {
+        cont.innerHTML = `<div class="tk__vacio">${this._tickets.length ? 'Ningún ticket coincide con el filtro.' : 'No hay tickets todavía.'}</div>`;
+        return;
+      }
+      cont.innerHTML = items.map(t => {
+        const [et, cls] = EST[t.status] || ['—', 'nuevo'];
+        const pr = t.priority || 'media';
+        const nAdj = (t.files || []).length;
+        const nCom = (t.comments || []).length;
+        return `<button class="tkrow" data-tkid="${esc(t.id)}">
+          <span class="tkrow__pri tkrow__pri--${pr}" title="${PRI[pr] || pr}"></span>
+          <span class="tkrow__main">
+            <span class="tkrow__top">
+              <span class="tkrow__title">${esc(t.title)}</span>
+              <span class="tkitem__est tkitem__est--${cls}">${et}</span>
+            </span>
+            <span class="tkrow__meta">${esc(PRI[pr] || pr)}${t.category ? ' · ' + esc(t.category) : ''} · ${fechaCorta(t.createdAt)}${this._admin && t.userEmail ? ' · ' + esc(t.userEmail) : ''}${nAdj ? ' · 📎 ' + nAdj : ''}${nCom ? ' · 💬 ' + nCom : ''}</span>
+          </span>
+          <span class="tkrow__go">›</span>
+        </button>`;
+      }).join('');
+    },
+
+    aplicarFiltro(k) {
+      this._filtro = k;
+      document.querySelectorAll('.tkfil').forEach(c => c.classList.toggle('tkfil--on', c.dataset.tkfiltro === k));
+      this.pintarItems();
+    },
+
+    // Cambiar la categoría de un ticket ya creado (solo super_admin; el backend
+    // lo valida). Actualiza en memoria para no recargar todo.
+    async cambiarCategoria(id, category) {
+      const h = { 'Content-Type': 'application/json' };
+      { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+      try {
+        const r = await fetch(TKW.api + '/api/tickets/' + encodeURIComponent(id), { method: 'PATCH', headers: h, body: JSON.stringify({ category }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) t.category = d.category;
+        TKW.toast('Categoría actualizada');
+      } catch (e) {
+        TKW.toast('No se pudo cambiar la categoría: ' + e.message);
+      }
+    },
+
+    // Cambiar el estado del ticket (solo super; incluye "Esperando cliente"). Lo valida el backend.
+    async cambiarEstado(id, status) {
+      const h = { 'Content-Type': 'application/json' };
+      { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+      try {
+        const r = await fetch(TKW.api + '/api/tickets/' + encodeURIComponent(id), { method: 'PATCH', headers: h, body: JSON.stringify({ status }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) t.status = d.status || status;
+        this.abrirDetalle(id);   // re-pinta badge/estado
+        TKW.toast('Estado actualizado');
+      } catch (e) {
+        TKW.toast('No se pudo cambiar el estado: ' + e.message);
+      }
+    },
+
+    // Calificación (1–5) de la resolución. Solo la puede poner quien creó el ticket.
+    async calificar(id, rating) {
+      const h = { 'Content-Type': 'application/json' };
+      { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+      try {
+        const r = await fetch(TKW.api + '/api/tickets/rate', { method: 'POST', headers: h, body: JSON.stringify({ ticketId: id, rating }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) t.rating = d.rating;
+        this.abrirDetalle(id);   // re-pinta las estrellas con la nota guardada
+        TKW.toast('¡Gracias por tu calificación!');
+      } catch (e) {
+        TKW.toast('No se pudo calificar: ' + e.message);
+      }
+    },
+
+    // El creador deja un comentario propio en su ticket (p.ej. tras calificar).
+    async comentar(id) {
+      const ta = document.getElementById('tkMyCom');
+      const body = ta ? ta.value.trim() : '';
+      if (!body) { TKW.toast('Escribe un comentario primero'); if (ta) ta.focus(); return; }
+      const h = { 'Content-Type': 'application/json' };
+      { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+      try {
+        const r = await fetch(TKW.api + '/api/tickets/comment-mine', { method: 'POST', headers: h, body: JSON.stringify({ ticketId: id, comment: body }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) { t.comments = t.comments || []; if (d.comment) t.comments.push(d.comment); }
+        this.abrirDetalle(id);   // re-pinta con el comentario nuevo
+        TKW.toast('Comentario enviado');
+      } catch (e) {
+        TKW.toast('No se pudo enviar: ' + e.message);
+      }
+    },
+
+    // El soporte (super admin) responde al cliente desde el panel. Opción de
+    // "esperar respuesta del cliente" → pasa el ticket a esperando_cliente.
+    async responder(id) {
+      const ta = document.getElementById('tkStaffCom');
+      const wait = document.getElementById('tkStaffWait');
+      const fi = document.getElementById('tkStaffFiles');
+      const body = ta ? ta.value.trim() : '';
+      const files = fi && fi.files ? [...fi.files] : [];
+      if (!body && !files.length) { TKW.toast('Escribe una respuesta o adjunta un archivo'); if (ta) ta.focus(); return; }
+      const esperar = !!(wait && wait.checked);
+      // Con adjuntos va como multipart (sin Content-Type: lo pone el navegador con el boundary).
+      const h = {};
+      { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+      let opts;
+      if (files.length) {
+        const fd = new FormData();
+        fd.append('ticketId', id); fd.append('comment', body); fd.append('waitingCustomer', esperar ? 'true' : 'false');
+        files.forEach(f => fd.append('archivos', f, f.name));
+        opts = { method: 'POST', headers: h, body: fd };
+      } else {
+        opts = { method: 'POST', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticketId: id, comment: body, waitingCustomer: esperar }) };
+      }
+      try {
+        const r = await fetch(TKW.api + '/api/tickets/comment-staff', opts);
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) { t.comments = t.comments || []; if (d.comment) t.comments.push(d.comment); if (d.status) t.status = d.status; }
+        this.abrirDetalle(id);
+        TKW.toast(d.status === 'esperando_cliente' ? 'Respuesta enviada · esperando al cliente' : 'Respuesta enviada');
+      } catch (e) {
+        TKW.toast('No se pudo enviar: ' + e.message);
+      }
+    },
+
+    // Borrar un ticket por completo (solo super admin; lo valida el backend).
+    async borrar(id) {
+      const t = this._tickets.find(x => String(x.id) === String(id));
+      if (!confirm(`¿Borrar el ticket "${(t && t.title) || id}"? Esta acción no se puede deshacer.`)) return;
+      const h = {};
+      { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+      try {
+        const r = await fetch(TKW.api + '/api/tickets/' + encodeURIComponent(id), { method: 'DELETE', headers: h });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        this._tickets = this._tickets.filter(x => String(x.id) !== String(id));
+        this.pintarLista();
+        TKW.toast('Ticket borrado');
+      } catch (e) {
+        TKW.toast('No se pudo borrar: ' + e.message);
+      }
+    },
+
+    // Ficha de un ticket: descripción completa, badges, adjuntos con miniatura.
+    abrirDetalle(id) {
+      const t = this._tickets.find(x => String(x.id) === String(id));
+      if (!t) return;
+      const [et, cls] = EST[t.status] || ['—', 'nuevo'];
+      const pr = t.priority || 'media';
+      const imgs = (t.files || []).filter(f => esImagen(f.mime));
+      const otros = (t.files || []).filter(f => !esImagen(f.mime));
+      $('#ticketList').innerHTML = `
+        <div class="tkdet">
+          <button class="tkdet__back" data-tkback>‹ Volver a la lista</button>
+          <h3 class="tkdet__title">${esc(t.title)}</h3>
+          <div class="tkdet__badges">
+            ${this._super
+              ? `<select class="tkbadge tkest-sel tkest-sel--${cls}" data-tkest="${esc(t.id)}" title="Cambiar estado (super admin)">${ESTADOS.map(s => `<option value="${s}"${s === t.status ? ' selected' : ''}>${EST[s][0]}</option>`).join('')}</select>`
+              : `<span class="tkitem__est tkitem__est--${cls}">${et}</span>`}
+            <span class="tkbadge tkbadge--${pr}">${esc(PRI[pr] || pr)}</span>
+            ${this._super
+              ? `<select class="tkbadge tkcat-sel" data-tkcat="${esc(t.id)}" title="Cambiar categoría (super admin)">${CATEGORIAS.map(c => `<option value="${esc(c)}"${c === t.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}${(t.category && !CATEGORIAS.includes(t.category)) ? `<option value="${esc(t.category)}" selected>${esc(t.category)}</option>` : ''}</select>`
+              : (t.category ? `<span class="tkbadge">${esc(t.category)}</span>` : '')}
+          </div>
+          <div class="tkdet__meta">Creado ${fechaLarga(t.createdAt)}${this._admin && t.userEmail ? ' · por ' + esc(t.userEmail) : ''}${t.completedAt ? ' · Resuelto ' + fechaLarga(t.completedAt) : ''}</div>
+          ${(t.affectedConversation || t.affectedPhone) ? `<div class="tkdet__meta">💬 Conversación afectada: ${esc(t.affectedConversation || '—')}${t.affectedPhone ? ' · 📞 ' + esc(t.affectedPhone) : ''}</div>` : ''}
+          <div class="tkdet__desc">${esc(t.description || '—').replace(/\n/g, '<br>')}</div>
+          ${imgs.length ? `<div class="tkdet__sec">Capturas</div><div class="tkdet__imgs">${imgs.map(f => `<a class="tkdet__img" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy" /></a>`).join('')}</div>` : ''}
+          ${otros.length ? `<div class="tkdet__sec">Adjuntos</div><div class="tkitem__adjs">${otros.map(f => `<a class="tkitem__adj" href="${esc(f.url)}" target="_blank" rel="noopener">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('')}</div>` : ''}
+          ${(t.comments && t.comments.length) ? `<div class="tkdet__sec">Respuestas (${t.comments.length})</div>
+            <div class="tkcoms">${t.comments.map(cm => `
+              <div class="tkcom${cm.source === 'cliente' ? ' tkcom--mine' : ''}">
+                <div class="tkcom__h">${cm.source === 'cliente' ? '🙋' : '💬'} ${esc(cm.author || 'Soporte')} · ${fechaCorta(cm.createdAt)}</div>
+                ${cm.body ? `<div class="tkcom__b">${esc(cm.body).replace(/\n/g, '<br>')}</div>` : ''}
+                ${(cm.files && cm.files.length) ? `<div class="tkcom__files">${cm.files.map(f => esImagen(f.mime)
+                  ? `<a class="tkcom__img" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy" /></a>`
+                  : `<a class="tkcom__file" href="${esc(f.url)}" target="_blank" rel="noopener">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('')}</div>` : ''}
+              </div>`).join('')}</div>` : ''}
+          ${this._super && t.status !== 'completado' ? `<div class="tkdet__sec">Responder al cliente</div>
+            <div class="tkstaff">
+              <textarea id="tkStaffCom" class="tkmycom__ta" rows="2" maxlength="4000" placeholder="Escribe la respuesta para el cliente…"></textarea>
+              <div class="tkstaff__row">
+                <input type="file" id="tkStaffFiles" multiple hidden />
+                <button type="button" class="tkstaff__attach" data-tkstaffattach>📎 Adjuntar</button>
+                <span class="tkstaff__files" id="tkStaffFilesLbl"></span>
+              </div>
+              <label class="tkstaff__wait"><input type="checkbox" id="tkStaffWait"${t.status === 'esperando_cliente' ? ' checked' : ''} /> Esperar respuesta del cliente</label>
+              <button class="tkmycom__btn" data-tkstaff="${esc(t.id)}">Responder al cliente</button>
+            </div>` : ''}
+          ${t.status === 'completado' ? `<div class="tkdet__sec">Calificación de la resolución</div>
+            <div class="tkrate">
+              ${t.mine
+                ? `${estrellasHtml(t.rating, true, t.id)}${t.rating != null
+                    ? `<span class="tkrate__val">${t.rating}/5</span>`
+                    : `<span class="tkrate__hint">Toca una estrella para calificar</span>`}`
+                : (t.rating != null
+                    ? `${estrellasHtml(t.rating, false)}<span class="tkrate__val">${t.rating}/5</span>`
+                    : `<span class="tkrate__hint">Sin calificar aún.</span>`)}
+            </div>` : ''}
+          ${(t.mine && (t.status === 'completado' || t.status === 'esperando_cliente')) ? `
+            ${t.status === 'esperando_cliente' ? `<div class="tkmycom__wait">❓ Están esperando tu respuesta para continuar con el ticket.</div>` : ''}
+            <div class="tkmycom">
+              <textarea id="tkMyCom" class="tkmycom__ta" rows="2" maxlength="4000" placeholder="${t.status === 'esperando_cliente' ? 'Escribe tu aclaración…' : 'Escribe un comentario sobre la resolución…'}"></textarea>
+              <button class="tkmycom__btn" data-tkmycom="${esc(t.id)}">${t.status === 'esperando_cliente' ? 'Responder' : 'Enviar comentario'}</button>
+            </div>` : ''}
+          ${this._super ? `<div class="tkdet__danger"><button class="tkdel" data-tkdel="${esc(t.id)}">🗑 Borrar ticket</button></div>` : ''}
+        </div>`;
+    },
+
+    pintarForm() {
+      const box = $('#ticketForm');
+      // Si hay una conversación abierta, pre-llenamos la conversación afectada.
+      const activa = (global.Store && Store.activeConversation && Store.activeConversation()) || null;
+      const preTel = activa && activa.phone ? activa.phone : '';
+      const preConv = activa && activa.name && activa.name !== '?' ? activa.name : '';
+      box.innerHTML = `
+        <label class="tk__lbl">Asunto
+          <input id="tkAsunto" class="tk__inp" maxlength="120" placeholder="Resumen breve del problema" />
+        </label>
+        <div class="tk__row">
+          <label class="tk__lbl">Prioridad
+            <select id="tkPrioridad" class="tk__inp">
+              ${PRIORIDADES.map(p => `<option value="${p.v}" ${p.v === 'media' ? 'selected' : ''}>${p.t}</option>`).join('')}
+            </select>
+          </label>
+          <label class="tk__lbl">Categoría
+            <select id="tkCategoria" class="tk__inp">
+              ${CATEGORIAS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <div class="tk__row">
+          <label class="tk__lbl">Conversación afectada <span class="tk__hint">(opcional)</span>
+            <input id="tkConv" class="tk__inp" maxlength="120" placeholder="Nombre del contacto" value="${esc(preConv)}" />
+          </label>
+          <label class="tk__lbl">Teléfono afectado <span class="tk__hint">(opcional)</span>
+            <input id="tkTel" class="tk__inp" maxlength="30" placeholder="Ej. 18091234567" value="${esc(preTel)}" />
+          </label>
+        </div>
+        <label class="tk__lbl">Descripción
+          <textarea id="tkDesc" class="tk__inp tk__area" rows="5" placeholder="Cuéntanos qué pasó, con el mayor detalle posible…"></textarea>
+        </label>
+        <div class="tk__lbl">Adjuntos <span class="tk__hint">— capturas, PDF… máx. ${MAX_ARCHIVOS} archivos de 10 MB</span>
+          <input type="file" id="tkFiles" multiple hidden
+                 accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip" />
+          <button type="button" class="tk__adj" id="tkAdjBtn">📎 Añadir archivos</button>
+          <div class="tk__chips" id="tkChips"></div>
+        </div>
+        <p class="tk__err" id="tkErr" hidden></p>
+        <button class="tk__enviar" id="tkEnviar">Enviar ticket</button>`;
+
+      $('#tkEnviar').addEventListener('click', () => this.enviar());
+      $('#tkAdjBtn').addEventListener('click', () => $('#tkFiles').click());
+      $('#tkFiles').addEventListener('change', e => this.añadir(e.target.files));
+      $('#tkChips').addEventListener('click', e => {
+        const b = e.target.closest('[data-quitar]');
+        if (b) { this.adjuntos.splice(Number(b.dataset.quitar), 1); this.pintarChips(); }
+      });
+      // Arrastrar y soltar sobre la descripción: es lo natural para una captura.
+      const area = $('#tkDesc');
+      area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('tk__area--drop'); });
+      area.addEventListener('dragleave', () => area.classList.remove('tk__area--drop'));
+      area.addEventListener('drop', e => {
+        e.preventDefault(); area.classList.remove('tk__area--drop');
+        this.añadir(e.dataTransfer.files);
+      });
+      // Pegar una captura del portapapeles (Win+Shift+S → Ctrl+V).
+      area.addEventListener('paste', e => {
+        const imgs = [...(e.clipboardData ? e.clipboardData.files : [])].filter(f => f.type.startsWith('image/'));
+        if (imgs.length) { e.preventDefault(); this.añadir(imgs); }
+      });
+      this.pintarChips();
+    },
+
+    añadir(lista) {
+      const err = $('#tkErr');
+      const nuevos = [...(lista || [])];
+      let aviso = '';
+      for (const f of nuevos) {
+        if (this.adjuntos.length >= MAX_ARCHIVOS) { aviso = 'Máximo ' + MAX_ARCHIVOS + ' archivos.'; break; }
+        if (f.size > MAX_BYTES) { aviso = `"${f.name}" pesa ${peso(f.size)}: el máximo es 10 MB.`; continue; }
+        if (this.adjuntos.some(a => a.name === f.name && a.size === f.size)) continue;   // mismo archivo dos veces
+        this.adjuntos.push(f);
+      }
+      if (err) { err.textContent = aviso; err.hidden = !aviso; }
+      $('#tkFiles').value = '';
+      this.pintarChips();
+    },
+
+    pintarChips() {
+      const box = $('#tkChips');
+      if (!box) return;
+      box.innerHTML = this.adjuntos.map((f, i) =>
+        `<span class="tk__chip">${iconoDe(f.type)} <span class="tk__chip-n">${esc(f.name)}</span>
+          <span class="tk__chip-p">${peso(f.size)}</span>
+          <button type="button" class="tk__chip-x" data-quitar="${i}" title="Quitar">×</button></span>`).join('');
+    },
+
+    async enviar() {
+      const asunto = $('#tkAsunto').value.trim();
+      const desc = $('#tkDesc').value.trim();
+      const err = $('#tkErr');
+      err.hidden = true;
+      if (!asunto || !desc) { err.textContent = 'El asunto y la descripción son obligatorios.'; err.hidden = false; return; }
+
+      const btn = $('#tkEnviar');
+      btn.disabled = true; btn.textContent = 'Enviando…';
+
+      const usuario = await this.quien();
+      const campos = {
+        asunto,
+        descripcion: desc,
+        prioridad: $('#tkPrioridad').value,
+        categoria: $('#tkCategoria').value,
+        telefono: ($('#tkTel') && $('#tkTel').value.trim()) || '',
+        conversacion: ($('#tkConv') && $('#tkConv').value.trim()) || '',
+        origen: 'web',
+        app: TKW.app || 'panel',
+        usuario
+      };
+
+      try {
+        const h = {};
+        { const _t = TKW.token(); if (_t) h['Authorization'] = 'Bearer ' + _t; }
+        // Con adjuntos va como multipart; sin ellos, JSON de siempre.
+        let body;
+        if (this.adjuntos.length) {
+          body = new FormData();
+          Object.entries(campos).forEach(([k, v]) => body.append(k, typeof v === 'object' ? JSON.stringify(v) : v));
+          this.adjuntos.forEach(f => body.append('archivos', f, f.name));
+          // OJO: nada de Content-Type a mano — el navegador pone el boundary.
+        } else {
+          h['Content-Type'] = 'application/json';
+          body = JSON.stringify(campos);
+        }
+        const r = await fetch(TKW.api + '/api/tickets', { method: 'POST', headers: h, body });
+        const data = await r.json().catch(() => null);
+        if (!r.ok) throw new Error((data && data.error) || 'Error ' + r.status);
+        this.adjuntos = [];
+        $('#ticketForm').hidden = true;
+        $('#ticketOk').hidden = false;
+      } catch (e) {
+        err.textContent = 'No se pudo enviar: ' + e.message;
+        err.hidden = false;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Enviar ticket';
+      }
+    },
+
+    // Inyecta el modal en el DOM si aún no existe.
+    _injectModal() {
+      if (document.getElementById('ticketsModal')) return;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `
+        <div class="tkw-modal" id="ticketsModal" hidden>
+          <div class="tkw-back" data-close></div>
+          <div class="tkw-card">
+            <header class="tkw-head">
+              <h2>Tickets</h2>
+              <button class="tkw-close" data-close aria-label="Cerrar">✕</button>
+            </header>
+            <div class="tk__tabs">
+              <button class="tk__tab tk__tab--on" data-tkview="nuevo">Nuevo</button>
+              <button class="tk__tab" data-tkview="lista">Mis tickets</button>
+            </div>
+            <div class="tkw-body">
+              <div id="ticketForm"></div>
+              <div id="ticketOk" hidden class="tk__ok">
+                <div class="tk__ok-ic">✓</div>
+                <p><b>Ticket enviado.</b> Nuestro equipo lo revisará.</p>
+                <button class="tk__otro" id="tkOtro">Crear otro</button>
+              </div>
+              <div id="ticketList" hidden></div>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(wrap.firstElementChild);
+    },
+
+    // Config + montaje. Llamar una vez al arrancar el panel.
+    init(cfg) {
+      cfg = cfg || {};
+      TKW.api = String(cfg.apiBase || '').replace(/\/+$/, '');
+      TKW.getToken = cfg.getToken || null;
+      TKW.getUser = cfg.getUser || null;
+      TKW.app = cfg.app || 'panel';
+      this._injectModal();
+      // Botón: el que indique el host, o uno flotante propio. `button:false` = ninguno.
+      if (cfg.button !== false) {
+        if (cfg.button) {
+          const b = typeof cfg.button === 'string' ? document.querySelector(cfg.button) : cfg.button;
+          if (b) b.addEventListener('click', () => this.open());
+        } else if (!document.getElementById('tkwFab')) {
+          const fab = document.createElement('button');
+          fab.id = 'tkwFab'; fab.className = 'tkw-fab'; fab.type = 'button';
+          fab.innerHTML = '🎫 Tickets';
+          fab.addEventListener('click', () => this.open());
+          document.body.appendChild(fab);
+        }
+      }
+      this._wire();
+      return this;
+    },
+    open() { this.abrir(); },
+
+    _wire() {
+      const modal = $('#ticketsModal');
+      if (!modal || modal._tkwWired) return;
+      modal._tkwWired = true;
+      modal.addEventListener('click', e => {
+        if (e.target.hasAttribute('data-close')) return this.cerrar();
+        if (e.target.dataset.tkview === 'nuevo') return this.verNuevo();
+        if (e.target.dataset.tkview === 'lista') return this.verLista();
+        if (e.target.id === 'tkOtro') return this.verNuevo();
+        const chip = e.target.closest('[data-tkfiltro]');
+        if (chip) return this.aplicarFiltro(chip.dataset.tkfiltro);
+        const sc = e.target.closest('[data-tkscope]');
+        if (sc) { if (this._scope !== sc.dataset.tkscope) { this._scope = sc.dataset.tkscope; this.verLista(); } return; }
+        if (e.target.closest('[data-tkback]')) return this.pintarLista();
+        const star = e.target.closest('.tkstar[data-star]');
+        if (star) { const box = star.closest('[data-tkrate]'); if (box) return this.calificar(box.dataset.tkrate, Number(star.dataset.star)); }
+        const del = e.target.closest('[data-tkdel]');
+        if (del) return this.borrar(del.dataset.tkdel);
+        const myc = e.target.closest('[data-tkmycom]');
+        if (myc) return this.comentar(myc.dataset.tkmycom);
+        if (e.target.closest('[data-tkstaffattach]')) { const fi = document.getElementById('tkStaffFiles'); if (fi) fi.click(); return; }
+        const staff = e.target.closest('[data-tkstaff]');
+        if (staff) return this.responder(staff.dataset.tkstaff);
+        const row = e.target.closest('[data-tkid]');
+        if (row) return this.abrirDetalle(row.dataset.tkid);
+      });
+      // Buscador (solo re-pinta las filas, así no pierde el foco al escribir).
+      modal.addEventListener('input', e => {
+        if (e.target.id === 'tkBuscar') { this._busca = e.target.value; this.pintarItems(); }
+      });
+      // Selects de filtro (prioridad / categoría / fecha / orden).
+      modal.addEventListener('change', e => {
+        const catSel = e.target.closest('[data-tkcat]');
+        if (catSel) return this.cambiarCategoria(catSel.dataset.tkcat, catSel.value);
+        const estSel = e.target.closest('[data-tkest]');
+        if (estSel) return this.cambiarEstado(estSel.dataset.tkest, estSel.value);
+        if (e.target.id === 'tkStaffFiles') { const lbl = document.getElementById('tkStaffFilesLbl'); if (lbl) lbl.textContent = [...e.target.files].map(f => f.name).join(', '); return; }
+        const map = { tkPrio: '_prio', tkCat: '_cat', tkDias: '_dias', tkOrden: '_orden' };
+        const k = map[e.target.id];
+        if (k) { this[k] = e.target.value; this.pintarItems(); }
+      });
+    }
+  };
+
+  global.TicketsWidget = Tickets;
+})(window);

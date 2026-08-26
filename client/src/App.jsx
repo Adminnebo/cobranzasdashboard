@@ -13,6 +13,7 @@ import AssistantView from './components/AssistantView';
 import Login from './components/Login';
 import UsersAdmin from './components/UsersAdmin';
 import { useAuth } from './auth/AuthProvider';
+import { getAuthToken } from './auth/token';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊', perm: 'cobranzas.cartera' },
@@ -48,6 +49,19 @@ export default function App() {
   };
 
   const REFRESH_MS = 60000; // auto-refresh de llamadas cada minuto
+
+  // Sistema de tickets (mismo del inbox): botón flotante 🎫 + modal. Comparte la
+  // sesión Supabase; llama al backend del inbox (CORS ya permite *.neboaiconsulting.com).
+  useEffect(() => {
+    if (authed && window.TicketsWidget) {
+      window.TicketsWidget.init({
+        apiBase: 'https://whatsapp.neboaiconsulting.com',
+        getToken: () => getAuthToken(),
+        getUser: () => (user ? { email: user.email, name: user.user_metadata && user.user_metadata.full_name } : null),
+        app: 'cobranzas',
+      });
+    }
+  }, [authed, user]);
 
   useEffect(() => {
     if (!authed) return; // no cargar datos sin sesión
