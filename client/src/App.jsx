@@ -211,6 +211,21 @@ export default function App() {
           <span className="badge ai">
             {analysis?.generado_por === 'openai' ? `IA · ${analysis.modelo}` : 'Heurística (sin API key)'}
           </span>
+          {puede('jarvis.usar') && (
+            <button
+              className="btn secondary"
+              title="Abrir Jarvis"
+              onClick={() => window.open(
+                // El token va en el fragmento de la URL, no en la query: no llega
+                // al servidor de Jarvis dentro de la URL, asi que no queda en sus
+                // logs de acceso ni se filtra por la cabecera Referer.
+                'https://jarvis-production-71c4.up.railway.app/entrar#t=' + encodeURIComponent(getAuthToken()),
+                '_blank'
+              )}
+            >
+              🧠 Jarvis
+            </button>
+          )}
           <button className="btn secondary icon-btn" onClick={toggleTheme} title={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'} aria-label="Cambiar tema">
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
