@@ -12,6 +12,7 @@ import HistoryCard from './components/HistoryCard';
 import AssistantView from './components/AssistantView';
 import Login from './components/Login';
 import UsersAdmin from './components/UsersAdmin';
+import PagosModal from './components/PagosModal';
 import { useAuth } from './auth/AuthProvider';
 import { getAuthToken } from './auth/token';
 
@@ -38,6 +39,7 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [me, setMe] = useState(null);
+  const [pagosOpen, setPagosOpen] = useState(false);
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
   const llamadasCountRef = useRef(null);
 
@@ -226,6 +228,13 @@ export default function App() {
               🧠 Jarvis
             </button>
           )}
+          {/* A diferencia de puede(), exige la lista cargada: lo que se debe no se
+              muestra "por las dudas" mientras /api/me no respondió. */}
+          {me && Array.isArray(me.permissions) && me.permissions.includes('pagos.ver') && (
+            <button className="btn secondary" title="Lo que se debe" onClick={() => setPagosOpen(true)}>
+              💳 Pagos
+            </button>
+          )}
           <button className="btn secondary icon-btn" onClick={toggleTheme} title={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'} aria-label="Cambiar tema">
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
@@ -268,6 +277,8 @@ export default function App() {
       {tab === 'asistente' && puede('cobranzas.asistente') && <AssistantView />}
 
       {tab === 'usuarios' && me && me.isAdmin && <UsersAdmin currentEmail={me.email} />}
+
+      {pagosOpen && <PagosModal onClose={() => setPagosOpen(false)} />}
 
       <div className="footer">
         Prototipo · fuente: {data.source}. Conecta los webhooks de n8n en <code>server/.env</code> para datos en vivo.
