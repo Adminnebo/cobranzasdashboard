@@ -22,12 +22,14 @@ const TABS = [
   { id: 'asistente', label: 'Asistente IA', icon: '🤖', perm: 'cobranzas.asistente' },
 ];
 
-// Conmutador entre las 3 plataformas.
+// Conmutador entre plataformas.
 const PLATS = [
   { key: 'inbox', label: 'Conversaciones', icon: '💬', url: 'https://whatsapp.neboaiconsulting.com' },
   { key: 'cotizaciones', label: 'Cotizaciones', icon: '📄', url: 'https://panelcotizaciones.neboaiconsulting.com' },
   { key: 'cobranzas', label: 'Cobranzas', icon: '💰', url: 'https://panelcobranzas.neboaiconsulting.com' },
+  { key: 'marketing', label: 'Marketing', icon: '🎬', url: 'https://panel-production-f46d.up.railway.app' },
 ];
+const MARKETING_URL = PLATS.find((p) => p.key === 'marketing').url;
 
 export default function App() {
   const { loading: authLoading, authed, enabled: authEnabled, user, signOut } = useAuth();
@@ -40,6 +42,7 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [me, setMe] = useState(null);
   const [pagosOpen, setPagosOpen] = useState(false);
+  const [accesoMarketing, setAccesoMarketing] = useState(false);
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
   const llamadasCountRef = useRef(null);
 
@@ -92,6 +95,12 @@ export default function App() {
     fetchAnalysis().then((a) => mounted && setAnalysis(a)).catch((e) => mounted && setError(e.message)).finally(() => mounted && setAnalyzing(false));
     fetchHistory().then((h) => mounted && setHistory(h)).catch(() => {});
     fetchMe().then((r) => mounted && setMe(r)).catch(() => {});
+    // Marketing decide su propio acceso (solo super_admin o a quien ellos se lo den):
+    // se le pregunta con este mismo token y la pestaña sale solo si responde que sí.
+    fetch(MARKETING_URL + '/api/acceso', { headers: { Authorization: 'Bearer ' + getAuthToken() } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => mounted && setAccesoMarketing(!!(j && j.acceso)))
+      .catch(() => {});
 
     const id = setInterval(() => loadData(true), REFRESH_MS);
     return () => { mounted = false; clearInterval(id); };
@@ -197,7 +206,7 @@ export default function App() {
           <h1>Cobranzas IA · Panel de cartera</h1>
         </div>
         <nav className="platsw" aria-label="Cambiar de plataforma">
-          {PLATS.filter((p) => p.key === 'cobranzas' || !me || !Array.isArray(me.platforms) || !me.platforms.length || me.platforms.includes(p.key)).map((p) => (
+          {PLATS.filter((p) => p.key === 'cobranzas' || (p.key === 'marketing' ? accesoMarketing : !me || !Array.isArray(me.platforms) || !me.platforms.length || me.platforms.includes(p.key))).map((p) => (
             p.key === 'cobranzas'
               ? <span key={p.key} className="platsw__it platsw__it--on" title="Estás aquí"><span className="platsw__ic">{p.icon}</span>{p.label}</span>
               : <a key={p.key} className="platsw__it" href={p.url} title={`Ir a ${p.label}`}><span className="platsw__ic">{p.icon}</span>{p.label}</a>
