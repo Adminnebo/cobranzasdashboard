@@ -42,7 +42,6 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [me, setMe] = useState(null);
   const [pagosOpen, setPagosOpen] = useState(false);
-  const [accesoMarketing, setAccesoMarketing] = useState(false);
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
   const llamadasCountRef = useRef(null);
 
@@ -95,13 +94,6 @@ export default function App() {
     fetchAnalysis().then((a) => mounted && setAnalysis(a)).catch((e) => mounted && setError(e.message)).finally(() => mounted && setAnalyzing(false));
     fetchHistory().then((h) => mounted && setHistory(h)).catch(() => {});
     fetchMe().then((r) => mounted && setMe(r)).catch(() => {});
-    // Marketing decide su propio acceso (solo super_admin o a quien ellos se lo den):
-    // se le pregunta con este mismo token y la pestaña sale solo si responde que sí.
-    fetch(MARKETING_URL + '/api/acceso', { headers: { Authorization: 'Bearer ' + getAuthToken() } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => mounted && setAccesoMarketing(!!(j && j.acceso)))
-      .catch(() => {});
-
     const id = setInterval(() => loadData(true), REFRESH_MS);
     return () => { mounted = false; clearInterval(id); };
   }, [authed]);
@@ -206,7 +198,8 @@ export default function App() {
           <h1>Cobranzas IA · Panel de cartera</h1>
         </div>
         <nav className="platsw" aria-label="Cambiar de plataforma">
-          {PLATS.filter((p) => p.key === 'cobranzas' || (p.key === 'marketing' ? accesoMarketing : !me || !Array.isArray(me.platforms) || !me.platforms.length || me.platforms.includes(p.key))).map((p) => (
+          {/* Marketing se ve siempre: quien no tenga acceso ve allá un aviso claro (pedido 2026-09-23). */}
+          {PLATS.filter((p) => p.key === 'cobranzas' || p.key === 'marketing' || !me || !Array.isArray(me.platforms) || !me.platforms.length || me.platforms.includes(p.key)).map((p) => (
             p.key === 'cobranzas'
               ? <span key={p.key} className="platsw__it platsw__it--on" title="Estás aquí"><span className="platsw__ic">{p.icon}</span>{p.label}</span>
               : <a key={p.key} className="platsw__it" href={p.url} title={`Ir a ${p.label}`}><span className="platsw__ic">{p.icon}</span>{p.label}</a>
