@@ -27,7 +27,7 @@ const PLATS = [
   { key: 'inbox', label: 'Conversaciones', icon: '💬', url: 'https://whatsapp.neboaiconsulting.com' },
   { key: 'cotizaciones', label: 'Cotizaciones', icon: '📄', url: 'https://panelcotizaciones.neboaiconsulting.com' },
   { key: 'cobranzas', label: 'Cobranzas', icon: '💰', url: 'https://panelcobranzas.neboaiconsulting.com' },
-  { key: 'marketing', label: 'Marketing', icon: '🎬', url: 'https://panel-production-f46d.up.railway.app' },
+  { key: 'marketing', label: 'Marketing', icon: '🎬', url: 'https://panelmarketing.neboaiconsulting.com' },
 ];
 const MARKETING_URL = PLATS.find((p) => p.key === 'marketing').url;
 
