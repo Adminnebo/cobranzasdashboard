@@ -43,6 +43,7 @@ export default function Login() {
           {loading ? 'Entrando…' : 'Iniciar sesión'}
         </button>
         <p className="login-foot">¿No tienes cuenta? Contacta al administrador.</p>
+        <p className="login-foot"><a href="/privacidad">Política de privacidad</a></p>
       </form>
     </div>
   );

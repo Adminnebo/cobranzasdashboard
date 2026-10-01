@@ -411,6 +411,8 @@ app.delete('/api/users/:id', requireAdmin, async (req, res) => {
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
+  // Política de privacidad: pública, antes del fallback del SPA.
+  app.get('/privacidad', (req, res) => res.sendFile(path.join(clientDist, 'privacidad.html')));
   // Fallback SPA: cualquier ruta que no sea /api devuelve index.html.
   app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(clientDist, 'index.html')));
   console.log('[cobranzas-dashboard] Sirviendo cliente estático desde client/dist');

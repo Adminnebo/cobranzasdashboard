@@ -351,6 +351,8 @@ tr.row-open td { border-bottom: none; }
 .login-error { margin-top: 14px; color: var(--critical); font-size: 0.82rem; background: color-mix(in srgb, var(--critical) 10%, transparent); padding: 9px 12px; border-radius: 9px; }
 .login-btn { width: 100%; margin-top: 20px; padding: 12px; font-size: 0.92rem; }
 .login-foot { margin: 16px 0 0; font-size: 0.76rem; color: var(--text-muted); }
+.login-foot + .login-foot { margin-top: 6px; }
+.login-foot a { color: inherit; }
 
 /* ── Badge de usuario / logout ── */
 .user-badge { gap: 8px; max-width: 220px; }
