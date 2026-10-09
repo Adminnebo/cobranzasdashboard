@@ -54,6 +54,14 @@ export default function App() {
 
   const REFRESH_MS = 60000; // auto-refresh de llamadas cada minuto
 
+  // Política de privacidad: pop-up bloqueante para los administradores que aún no
+  // la aceptaron. El registro vive en el inbox; aceptar en un panel vale para todos.
+  useEffect(() => {
+    if (authed && window.PrivacyWidget) {
+      window.PrivacyWidget.init({ getToken: () => getAuthToken(), app: 'cobranzas' });
+    }
+  }, [authed]);
+
   // Sistema de tickets (mismo del inbox): botón flotante 🎫 + modal. Comparte la
   // sesión Supabase; llama al backend del inbox (CORS ya permite *.neboaiconsulting.com).
   useEffect(() => {
