@@ -10,6 +10,9 @@
  *     SIGUE con deuda vencida > 0, la promesa se marca 'incumplida' y se encola
  *     una llamada al SUB-AGENTE de seguimiento.
  *  3. Si ya no tiene deuda vencida, la promesa se marca 'cumplida'.
+ *  4. Una promesa cuya fecha quedó más de MAX_ATRASO_DIAS atrás NO genera llamada:
+ *     se cierra como 'incumplida' sin seguimiento. Así, si la revisión estuvo
+ *     parada un tiempo, al volver no se llama a quien prometió hace meses.
  */
 
 const db = require('./supabaseDb');
@@ -18,6 +21,9 @@ const queue = require('./queue');
 const TABLE = 'promesa_pago';
 const TZ = process.env.CRON_TZ || 'America/Santo_Domingo';
 const GRACIA_DIAS = parseInt(process.env.PROMESA_GRACIA_DIAS || '1', 10);
+// Antigüedad máxima (días desde la fecha prometida) para que una promesa incumplida
+// todavía amerite llamada de seguimiento.
+const MAX_ATRASO_DIAS = parseInt(process.env.PROMESA_MAX_ATRASO_DIAS || '7', 10);
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 // Intenciones que constituyen una promesa con fecha.
@@ -138,22 +144,33 @@ async function revisarIncumplidas(clientes) {
 
   // Promesas pendientes cuya fecha ya pasó (con la gracia aplicada).
   const rows = await db.select(TABLE, `?select=*&estado=eq.pendiente&fecha_prometida=lte.${limiteYmd}`);
-  if (!rows || !rows.length) return { revisadas: 0, cumplidas: 0, incumplidas: 0, encoladas: 0 };
+  if (!rows || !rows.length) return { revisadas: 0, cumplidas: 0, incumplidas: 0, viejas: 0, encoladas: 0 };
+
+  // Fecha prometida anterior a este corte = promesa vieja: se cierra sin llamar.
+  const corteViejas = new Date(new Date(hoy + 'T12:00:00Z').getTime() - MAX_ATRASO_DIAS * 86400000)
+    .toISOString().slice(0, 10);
 
   const byPhone = new Map(clientes.map((c) => [c.phone, c]));
   const cumplidas = [];
   const incumplidas = [];
+  const viejas = [];
 
   for (const p of rows) {
     const c = byPhone.get(String(p.phone));
     if (!c) continue;                       // ya no está en la cartera -> se ignora
-    if ((c.deuda_vencida || 0) > 0) incumplidas.push({ promesa: p, cliente: c });
-    else cumplidas.push(p);                 // ya no debe vencido -> pagó
+    if ((c.deuda_vencida || 0) <= 0) cumplidas.push(p);          // ya no debe vencido -> pagó
+    else if (String(p.fecha_prometida) < corteViejas) viejas.push(p);
+    else incumplidas.push({ promesa: p, cliente: c });
   }
 
   // Marcar cumplidas
   for (const p of cumplidas) {
     await db.update(TABLE, `?id=eq.${p.id}`, { estado: 'cumplida' });
+  }
+
+  // Viejas: incumplidas, pero SIN llamada (seguimiento_at queda vacío).
+  for (const p of viejas) {
+    await db.update(TABLE, `?id=eq.${p.id}`, { estado: 'incumplida' });
   }
 
   // Marcar incumplidas + encolar al sub-agente de seguimiento
@@ -175,8 +192,8 @@ async function revisarIncumplidas(clientes) {
     }
   }
 
-  console.log(`[promesas] revisadas ${rows.length} · cumplidas ${cumplidas.length} · incumplidas ${incumplidas.length} · encoladas ${encoladas}`);
-  return { revisadas: rows.length, cumplidas: cumplidas.length, incumplidas: incumplidas.length, encoladas };
+  console.log(`[promesas] revisadas ${rows.length} · cumplidas ${cumplidas.length} · incumplidas ${incumplidas.length} · viejas sin llamada ${viejas.length} · encoladas ${encoladas}`);
+  return { revisadas: rows.length, cumplidas: cumplidas.length, incumplidas: incumplidas.length, viejas: viejas.length, encoladas };
 }
 
 /** Resumen para el dashboard. */
@@ -192,4 +209,4 @@ async function resumen() {
   };
 }
 
-module.exports = { sincronizar, revisarIncumplidas, resumen, GRACIA_DIAS };
+module.exports = { sincronizar, revisarIncumplidas, resumen, GRACIA_DIAS, MAX_ATRASO_DIAS };
