@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchData, fetchAnalysis, fetchHistory, fetchMe } from './api';
+import { fetchData, fetchAnalysis, fetchHistory, fetchMe, fetchConfig } from './api';
 import { money, moneyShort, pct, num } from './format';
 import { intencionColor } from './constants';
 import KpiCard from './components/KpiCard';
@@ -12,6 +12,7 @@ import HistoryCard from './components/HistoryCard';
 import AssistantView from './components/AssistantView';
 import Login from './components/Login';
 import UsersAdmin from './components/UsersAdmin';
+import CorreoPanel from './components/CorreoPanel';
 import PagosModal from './components/PagosModal';
 import { useAuth } from './auth/AuthProvider';
 import { getAuthToken } from './auth/token';
@@ -41,6 +42,8 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [me, setMe] = useState(null);
+  // URL del botón "Conectar Gmail" (correo-servicio); null = la pestaña Correo no aparece.
+  const [correoEmbed, setCorreoEmbed] = useState(null);
   const [pagosOpen, setPagosOpen] = useState(false);
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
   const llamadasCountRef = useRef(null);
@@ -102,6 +105,7 @@ export default function App() {
     fetchAnalysis().then((a) => mounted && setAnalysis(a)).catch((e) => mounted && setError(e.message)).finally(() => mounted && setAnalyzing(false));
     fetchHistory().then((h) => mounted && setHistory(h)).catch(() => {});
     fetchMe().then((r) => mounted && setMe(r)).catch(() => {});
+    fetchConfig().then((c) => mounted && setCorreoEmbed((c && c.correo && c.correo.embed) || null)).catch(() => {});
     const id = setInterval(() => loadData(true), REFRESH_MS);
     return () => { mounted = false; clearInterval(id); };
   }, [authed]);
@@ -146,7 +150,7 @@ export default function App() {
   // Si la pestaña activa dejó de estar permitida, salta a la primera visible.
   useEffect(() => {
     if (!me) return;
-    const activaOk = tab === 'usuarios' ? me.isAdmin : puede((TABS.find((t) => t.id === tab) || {}).perm);
+    const activaOk = tab === 'usuarios' || tab === 'correo' ? me.isAdmin : puede((TABS.find((t) => t.id === tab) || {}).perm);
     if (!activaOk && tabsVisibles[0]) setTab(tabsVisibles[0].id);
   }, [me]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -272,6 +276,11 @@ export default function App() {
             <span className="tab-ic">🔐</span>Usuarios
           </button>
         )}
+        {me && me.isAdmin && correoEmbed && (
+          <button className={`tab ${tab === 'correo' ? 'active' : ''}`} onClick={() => setTab('correo')}>
+            <span className="tab-ic">✉️</span>Correo
+          </button>
+        )}
       </nav>
 
       {tab === 'dashboard' && puede('cobranzas.cartera') && (
@@ -287,6 +296,8 @@ export default function App() {
       {tab === 'asistente' && puede('cobranzas.asistente') && <AssistantView />}
 
       {tab === 'usuarios' && me && me.isAdmin && <UsersAdmin currentEmail={me.email} />}
+
+      {tab === 'correo' && me && me.isAdmin && correoEmbed && <CorreoPanel embed={correoEmbed} />}
 
       {pagosOpen && <PagosModal onClose={() => setPagosOpen(false)} />}
 

@@ -1,0 +1,36 @@
+// Correo de cobranzas: el Gmail del cliente conectado con OAuth de Nebo AI (correo-servicio).
+// Este servidor guarda la clave del cliente (CORREO_CLAVE) y reenvía; el navegador nunca la ve.
+// Sin CORREO_URL + CORREO_CLAVE no hay pestaña ni rutas: el panel queda como siempre.
+const express = require('express');
+
+const URL_BASE = () => String(process.env.CORREO_URL || '').replace(/\/+$/, '');
+const CLAVE = () => process.env.CORREO_CLAVE || '';
+const configurado = () => !!(URL_BASE() && CLAVE());
+const embedUrl = () => `${URL_BASE()}/embed.js`;
+
+async function servicio(metodo, ruta, cuerpo) {
+  const r = await fetch(URL_BASE() + ruta, {
+    method: metodo,
+    headers: { 'x-api-key': CLAVE(), 'content-type': 'application/json' },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+    signal: AbortSignal.timeout(20000),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const e = new Error(j.message || `El servicio de correo respondió ${r.status}`);
+    e.status = r.status >= 500 ? 502 : r.status;
+    throw e;
+  }
+  return j;
+}
+
+const router = express.Router();
+router.use((req, res, next) => (configurado() ? next() : res.status(404).json({ error: 'Correo no configurado' })));
+const manejar = (fn) => (req, res) => fn(req).then((j) => res.json(j), (e) => res.status(e.status || 500).json({ error: e.message }));
+
+router.get('/', manejar(() => servicio('GET', '/v1/conexion')));
+// El origen del panel va al servicio para que la ventana de Google avise solo a esta página.
+router.post('/sesion', manejar((req) => servicio('POST', '/v1/conexion/sesion', { origen: req.get('origin') || null })));
+router.delete('/', manejar(() => servicio('DELETE', '/v1/conexion')));
+
+module.exports = { router, configurado, embedUrl };
