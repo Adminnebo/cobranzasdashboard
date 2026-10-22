@@ -10,6 +10,7 @@ const { computeMetrics } = require('./services/metrics');
 const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
 const chatStore = require('./services/chatStore');
+const correo = require('./services/correo');
 const { requireAuth, requireAdmin, requirePlatform, requirePermission, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe } = require('./services/auth');
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
@@ -55,7 +56,8 @@ app.get('/api/health', (req, res) => {
 });
 
 // Config pública para inicializar Supabase en el frontend (no expone secretos).
-app.get('/api/config', (req, res) => res.json(publicConfig()));
+// correo: la pestaña Correo (Gmail de cobranzas) solo aparece si el servicio está configurado.
+app.get('/api/config', (req, res) => res.json({ ...publicConfig(), correo: correo.configurado() ? { embed: correo.embedUrl() } : null }));
 
 // Proxy de grabaciones (público: el <audio> no puede mandar token). Con
 // allowlist de hosts. Re-sirve el WAV con Content-Length + Range para que el
@@ -380,6 +382,9 @@ app.get('/api/calls/log', requirePermission('cobranzas.clientes'), async (req, r
 });
 
 // ── Administración de usuarios (solo admins) ──
+// Correo de cobranzas (Gmail del cliente vía correo-servicio): solo admins.
+app.use('/api/correo', requireAdmin, correo.router);
+
 app.get('/api/users', requireAdmin, async (req, res) => {
   try { res.json({ users: await users.listUsers() }); }
   catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') }); }

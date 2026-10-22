@@ -93,3 +93,9 @@ export const fetchData = () => get('/api/data');
 export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '?refresh=1' : ''}`);
 export const fetchHistory = () => get('/api/history');
 export const fetchHealth = () => get('/api/health');
+
+// Correo de cobranzas (Gmail del cliente, vía correo-servicio).
+export const fetchConfig = () => get('/api/config');
+export const correoEstado = () => get('/api/correo');
+export const correoSesion = () => post('/api/correo/sesion', {});
+export const correoDesconectar = () => del('/api/correo');
