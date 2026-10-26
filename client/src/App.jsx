@@ -235,7 +235,7 @@ export default function App() {
                 // El token va en el fragmento de la URL, no en la query: no llega
                 // al servidor de Jarvis dentro de la URL, asi que no queda en sus
                 // logs de acceso ni se filtra por la cabecera Referer.
-                'https://jarvis-production-71c4.up.railway.app/entrar#t=' + encodeURIComponent(getAuthToken()),
+                'https://asistente.neboaiconsulting.com/entrar#t=' + encodeURIComponent(getAuthToken()),
                 '_blank'
               )}
             >
