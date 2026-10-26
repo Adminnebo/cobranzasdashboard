@@ -145,6 +145,17 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Exige admin de la app O rol admin/super_admin en profiles (los admins del panel).
+async function requireAdminRol(req, res, next) {
+  if (!authEnabled) return res.status(403).json({ error: 'Auth no configurada' });
+  if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+  if (req.user.isAdmin) return next();
+  const p = await perfilDe(req.user.id);
+  const role = p && p.role;
+  if (role === 'admin' || role === 'super_admin') return next();
+  return res.status(403).json({ error: 'Requiere permisos de administrador' });
+}
+
 function publicConfig() {
   return {
     enabled: authEnabled,
@@ -153,4 +164,4 @@ function publicConfig() {
   };
 }
 
-module.exports = { requireAuth, requireAdmin, requirePlatform, requirePermission, isAdmin, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe, PLATAFORMAS };
+module.exports = { requireAuth, requireAdmin, requireAdminRol, requirePlatform, requirePermission, isAdmin, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe, PLATAFORMAS };
