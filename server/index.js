@@ -11,7 +11,7 @@ const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
 const chatStore = require('./services/chatStore');
 const correo = require('./services/correo');
-const { requireAuth, requireAdmin, requirePlatform, requirePermission, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe } = require('./services/auth');
+const { requireAuth, requireAdmin, requireAdminRol, requirePlatform, requirePermission, publicConfig, authEnabled, perfilDe, plataformasDe, permisosDe } = require('./services/auth');
 const users = require('./services/users');
 const clienteConfig = require('./services/clienteConfig');
 const callLists = require('./services/callLists');
@@ -382,8 +382,8 @@ app.get('/api/calls/log', requirePermission('cobranzas.clientes'), async (req, r
 });
 
 // ── Administración de usuarios (solo admins) ──
-// Correo de cobranzas (Gmail del cliente vía correo-servicio): solo admins.
-app.use('/api/correo', requireAdmin, correo.router);
+// Correo de cobranzas (Gmail del cliente vía correo-servicio): admins y super admins.
+app.use('/api/correo', requireAdminRol, correo.router);
 
 app.get('/api/users', requireAdmin, async (req, res) => {
   try { res.json({ users: await users.listUsers() }); }

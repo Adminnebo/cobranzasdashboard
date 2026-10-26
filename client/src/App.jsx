@@ -147,10 +147,12 @@ export default function App() {
   // que traiga la lista. El backend es la fuente de verdad; esto oculta pestañas.
   const puede = (k) => !me || me.isAdmin || !Array.isArray(me.permissions) || me.permissions.includes(k);
   const tabsVisibles = TABS.filter((t) => puede(t.perm));
+  // Correo: admin de la app o rol admin/super_admin de profiles.
+  const verCorreo = !!me && (me.isAdmin || me.role === 'admin' || me.role === 'super_admin');
   // Si la pestaña activa dejó de estar permitida, salta a la primera visible.
   useEffect(() => {
     if (!me) return;
-    const activaOk = tab === 'usuarios' || tab === 'correo' ? me.isAdmin : puede((TABS.find((t) => t.id === tab) || {}).perm);
+    const activaOk = tab === 'usuarios' ? me.isAdmin : tab === 'correo' ? verCorreo : puede((TABS.find((t) => t.id === tab) || {}).perm);
     if (!activaOk && tabsVisibles[0]) setTab(tabsVisibles[0].id);
   }, [me]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -276,7 +278,7 @@ export default function App() {
             <span className="tab-ic">🔐</span>Usuarios
           </button>
         )}
-        {me && me.isAdmin && correoEmbed && (
+        {verCorreo && correoEmbed && (
           <button className={`tab ${tab === 'correo' ? 'active' : ''}`} onClick={() => setTab('correo')}>
             <span className="tab-ic">✉️</span>Correo
           </button>
@@ -297,7 +299,7 @@ export default function App() {
 
       {tab === 'usuarios' && me && me.isAdmin && <UsersAdmin currentEmail={me.email} />}
 
-      {tab === 'correo' && me && me.isAdmin && correoEmbed && <CorreoPanel embed={correoEmbed} />}
+      {tab === 'correo' && verCorreo && correoEmbed && <CorreoPanel embed={correoEmbed} />}
 
       {pagosOpen && <PagosModal onClose={() => setPagosOpen(false)} />}
 
