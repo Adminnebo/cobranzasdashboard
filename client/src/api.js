@@ -94,8 +94,10 @@ export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '
 export const fetchHistory = () => get('/api/history');
 export const fetchHealth = () => get('/api/health');
 
-// Correo de cobranzas (Gmail del cliente, vía correo-servicio).
+// Correo de cobranzas (Gmail u Outlook del cliente, vía correo-servicio).
 export const fetchConfig = () => get('/api/config');
 export const correoEstado = () => get('/api/correo');
-export const correoSesion = () => post('/api/correo/sesion', {});
+export const correoSesion = (proveedor = 'google') => post('/api/correo/sesion', { proveedor });
 export const correoDesconectar = () => del('/api/correo');
+export const correoPlantilla = () => get('/api/correo/plantilla');
+export const guardarCorreoPlantilla = (p) => put('/api/correo/plantilla', p);
