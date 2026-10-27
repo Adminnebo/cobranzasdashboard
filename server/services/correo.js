@@ -30,7 +30,19 @@ const manejar = (fn) => (req, res) => fn(req).then((j) => res.json(j), (e) => re
 
 router.get('/', manejar(() => servicio('GET', '/v1/conexion')));
 // El origen del panel va al servicio para que la ventana de Google avise solo a esta página.
-router.post('/sesion', manejar((req) => servicio('POST', '/v1/conexion/sesion', { origen: req.get('origin') || null })));
+// proveedor: 'google' (Gmail) o 'microsoft' (Outlook, vía Zernio).
+router.post('/sesion', manejar((req) => servicio('POST', '/v1/conexion/sesion', {
+  origen: req.get('origin') || null,
+  proveedor: req.body && req.body.proveedor === 'microsoft' ? 'microsoft' : 'google',
+})));
 router.delete('/', manejar(() => servicio('DELETE', '/v1/conexion')));
+
+// Plantilla del correo de cobranza (la limpia y la guarda el servicio; n8n la usa al enviar con datos).
+router.get('/plantilla', manejar(() => servicio('GET', '/v1/plantilla')));
+router.put('/plantilla', manejar((req) => servicio('PUT', '/v1/plantilla', {
+  asunto: String((req.body && req.body.asunto) || ''),
+  html: String((req.body && req.body.html) || ''),
+  por: (req.user && req.user.email) || null,
+})));
 
 module.exports = { router, configurado, embedUrl };
