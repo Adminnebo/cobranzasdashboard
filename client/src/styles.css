@@ -583,3 +583,11 @@ tbody tr:hover { background: var(--surface-2); }
 /* Números de prueba (solo super admins) */
 .toolbar .sched-wrap { position: relative; }
 .tag-prueba { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 0.7rem; font-weight: 600; color: var(--text-secondary); border: 1px dashed var(--border); vertical-align: middle; }
+
+/* Estado de cobro (follow up) */
+.estado-cobro { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+.estado-cobro--promesa { border-color: color-mix(in srgb, var(--good) 45%, transparent); color: var(--good-ink); }
+.estado-cobro--dice_pago { border-style: dashed; }
+.estado-cobro--escalar { border-color: color-mix(in srgb, var(--serious) 55%, transparent); color: var(--serious); }
+.sched-num { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 7px; }
+.sched-num input { width: 58px; font: inherit; font-size: 0.82rem; padding: 4px 6px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }

@@ -77,15 +77,20 @@ async function triggerOne(cliente, agente = 'principal') {
   const payload = buildPayload(cliente);
   // Agente de voz elegido en Ajustes: el flujo de n8n lo usa para saber quién
   // llama. Si no hay ninguno configurado, no se manda (el flujo usa su default).
-  try {
-    const cfg = await schedule.get();
-    if (cfg && cfg.agentId) payload.agentId = cfg.agentId;
-  } catch (e) {
-    console.error('[calls] no se pudo leer el agente configurado:', e.message);
+  // El agente de Ajustes es el que hace la cobranza normal: el follow up tiene
+  // su propio flujo y agente, así que no se le manda.
+  if (agente !== 'seguimiento') {
+    try {
+      const cfg = await schedule.get();
+      if (cfg && cfg.agentId) payload.agentId = cfg.agentId;
+    } catch (e) {
+      console.error('[calls] no se pudo leer el agente configurado:', e.message);
+    }
   }
   if (agente === 'seguimiento') {
     payload.motivo = 'promesa_incumplida';
-    if (cliente.fecha_prometida) payload.fecha_prometida = cliente.fecha_prometida;
+    // YYYY-MM-DD; n8n la convierte en "hoy" / "el martes cuatro de noviembre".
+    if (cliente.fecha_prometida) payload.fecha_prometida = String(cliente.fecha_prometida).slice(0, 10);
   }
   const res = await fetch(url, {
     method: CALL_METHOD,

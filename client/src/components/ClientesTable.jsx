@@ -97,6 +97,9 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
       if (f.estado === 'activos' && !c.enabled) return false;
       if (f.estado === 'inactivos' && c.enabled) return false;
       if (f.estado === 'ivr' && !c.ivr) return false;
+      if (f.estado === 'promesa' && c.estadoCobro !== 'promesa') return false;
+      if (f.estado === 'dice_pago' && c.estadoCobro !== 'dice_pago') return false;
+      if (f.estado === 'escalar' && c.estadoCobro !== 'escalar') return false;
       if (f.estado === 'ivr_empresa' && !(c.ivr && c.ivrTipo !== 'buzon')) return false;
       if (f.estado === 'buzon' && !(c.ivr && c.ivrTipo === 'buzon')) return false;
       if (f.estado === 'sin_ivr' && c.ivr) return false;
@@ -315,6 +318,9 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
           <option value="todos">Todos los estados</option>
           <option value="activos">Solo activos</option>
           <option value="inactivos">Solo inactivos</option>
+          <option value="promesa">⏳ Con promesa (los llama el follow up)</option>
+          <option value="dice_pago">💬 Dice que pagó</option>
+          <option value="escalar">🙋 Pasar a una persona</option>
           <option value="ivr">IVR y Buzón (todos)</option>
           <option value="ivr_empresa">Solo IVR (empresa)</option>
           <option value="buzon">Solo Buzón (voicemail)</option>
@@ -538,6 +544,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                   <td>
                     <div style={{ fontWeight: 600 }}>{c.name}</div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{c.empresa}</div>
+                    <EstadoCobro c={c} />
                   </td>
                   <td style={{ fontVariantNumeric: 'tabular-nums', color: c.phone ? undefined : 'var(--text-muted)' }}>
                     {c.phone ? phoneFmt(c.phone) : 'sin teléfono'}
@@ -609,4 +616,21 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
       </div>
     </div>
   );
+}
+
+// Estado de cobro que maneja el follow up automático.
+const fechaCorta = (ymd) => {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}/.test(ymd)) return '';
+  const d = new Date(String(ymd).slice(0, 10) + 'T12:00:00Z');
+  return d.toLocaleDateString('es-DO', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+};
+function EstadoCobro({ c }) {
+  if (!c.estadoCobro) return null;
+  const e = {
+    promesa: { txt: `⏳ Promesa${c.estadoDetalle ? ' · ' + fechaCorta(c.estadoDetalle) : ''}`, tip: 'Prometió pagar: el agente normal no lo llama; ese día lo llama el follow up si sigue debiendo.' },
+    dice_pago: { txt: '💬 Dice que pagó', tip: 'Dijo que ya pagó. No se llama. Si el equipo verifica que no pagó, que lo vuelva a prender.' },
+    escalar: { txt: '🙋 Pasar a una persona', tip: 'Varias promesas incumplidas seguidas. No se llama hasta que alguien lo revise y lo vuelva a prender.' },
+  }[c.estadoCobro];
+  if (!e) return null;
+  return <span className={`estado-cobro estado-cobro--${c.estadoCobro}`} title={e.tip}>{e.txt}</span>;
 }

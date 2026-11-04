@@ -44,6 +44,7 @@ export default function SchedulePanel({ onSaved }) {
       const saved = await saveSchedule({
         enabled: cfg.enabled, weekdaysOnly: cfg.weekdaysOnly, autoEnqueue: cfg.autoEnqueue, blocks: cfg.blocks,
         agentId: cfg.agentId || null, agentName: cfg.agentName || null,
+        promesaTope: Number(cfg.promesaTope), promesaMaxAtraso: Number(cfg.promesaMaxAtraso), reintentoHoras: Number(cfg.reintentoHoras),
       });
       setCfg(saved);
       setOpen(false);
@@ -90,6 +91,23 @@ export default function SchedulePanel({ onSaved }) {
             <input type="checkbox" checked={cfg.autoEnqueue} onChange={(e) => set({ autoEnqueue: e.target.checked })} />
             Encolar a los clientes activos automáticamente (1×/día)
           </label>
+
+          {/* Follow up automático: tope de promesas, atraso máximo y reintentos. */}
+          <div className="sched-blocks">
+            <div className="sched-lbl">Follow up</div>
+            <label className="sched-num">
+              <span>Promesas incumplidas seguidas antes de pasar a una persona</span>
+              <input type="number" min="1" max="10" value={cfg.promesaTope ?? 3} onChange={(e) => set({ promesaTope: e.target.value })} />
+            </label>
+            <label className="sched-num">
+              <span>Días de atraso máximo para todavía llamar</span>
+              <input type="number" min="0" max="60" value={cfg.promesaMaxAtraso ?? 7} onChange={(e) => set({ promesaMaxAtraso: e.target.value })} />
+            </label>
+            <label className="sched-num">
+              <span>Horas para reintentar si no contesta (2.º intento al día siguiente)</span>
+              <input type="number" min="1" max="8" value={cfg.reintentoHoras ?? 2} onChange={(e) => set({ reintentoHoras: e.target.value })} />
+            </label>
+          </div>
 
           {/* Agente de voz que hace las llamadas: se manda como agentId en el webhook. */}
           <div className="sched-blocks">
