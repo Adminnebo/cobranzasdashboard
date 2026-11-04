@@ -29,6 +29,15 @@ const DEFAULT = {
   // de salientes; no cambia la asignación del número.
   agentId: null,
   agentName: null,
+  // Follow up (motor de promesas).
+  promesaTope: 3,        // promesas incumplidas seguidas antes de pasar a una persona
+  promesaMaxAtraso: 7,   // días máx. desde la fecha prometida para todavía llamar
+  reintentoHoras: 2,     // horas hasta reintentar un follow up no contestado, el mismo día
+};
+
+const entero = (v, def, min, max) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
 };
 
 function partsInTz(d = new Date()) {
@@ -76,6 +85,9 @@ async function get(force = false) {
         agentId: row.agent_id || null,
         agentName: row.agent_name || null,
         lastEnqueueDate: row.last_enqueue_date || null,
+        promesaTope: entero(row.promesa_tope, DEFAULT.promesaTope, 1, 10),
+        promesaMaxAtraso: entero(row.promesa_max_atraso, DEFAULT.promesaMaxAtraso, 0, 60),
+        reintentoHoras: entero(row.reintento_horas, DEFAULT.reintentoHoras, 1, 8),
         tz: TZ,
       }
     : { ...DEFAULT, lastEnqueueDate: null, tz: TZ };
@@ -102,6 +114,9 @@ async function set(patch, by) {
     blocks: normBlocks(next.blocks),
     agent_id: next.agentId || null,
     agent_name: next.agentName || null,
+    promesa_tope: entero(next.promesaTope, DEFAULT.promesaTope, 1, 10),
+    promesa_max_atraso: entero(next.promesaMaxAtraso, DEFAULT.promesaMaxAtraso, 0, 60),
+    reintento_horas: entero(next.reintentoHoras, DEFAULT.reintentoHoras, 1, 8),
     updated_at: new Date().toISOString(),
     updated_by: by || null,
   }, 'id');

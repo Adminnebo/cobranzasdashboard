@@ -125,11 +125,15 @@ app.get('/api/data', async (req, res) => {
 
     let enabledMap = new Map();
     let ivrMap = new Map();
+    let estadoMap = new Map();
     try {
       [enabledMap, ivrMap] = await Promise.all([clienteConfig.getEnabledMap(), ivr.getIvrMap()]);
     } catch (e) {
       console.error('[cliente_config] no disponible, todos disabled:', e.message);
     }
+    // Estado de cobro (promesa / dice que pagó / pasar a una persona). Si las
+    // columnas aún no existen (sql/003 sin correr), se sigue sin estados.
+    try { estadoMap = await clienteConfig.getEstadoMap(); } catch (e) { /* sin estados */ }
     // Última llamada de cada cliente (para mostrar su status en la tabla).
     const ultimaPorTel = new Map();
     for (const ll of llamadas) {
@@ -149,6 +153,9 @@ app.get('/api/data', async (req, res) => {
         ivrTipo: i ? i.tipo : null,
         ivrDetalle: i ? i.detalle : null,
         ivrAt: i ? i.at : null,
+        estadoCobro: (estadoMap.get(c.phone) || {}).estado || null,
+        estadoDetalle: (estadoMap.get(c.phone) || {}).detalle || null,
+        estadoAt: (estadoMap.get(c.phone) || {}).at || null,
         ultimaLlamada: ll
           ? {
               fecha: ll.created_at,
@@ -181,7 +188,10 @@ app.patch('/api/clientes/enabled', requirePermission('cobranzas.cliente_toggle')
     const { phones, enabled } = req.body || {};
     if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
     if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Falta enabled (boolean)' });
-    const out = await clienteConfig.setEnabled(phones, enabled, req.user ? req.user.email : null);
+    const por = req.user ? req.user.email : null;
+    const out = await clienteConfig.setEnabled(phones, enabled, por);
+    // La decisión de una persona manda sobre el follow up automático.
+    await promesas.cancelarPorCambioManual(phones, por).catch((e) => console.error('[promesas] cancelar manual:', e.message));
     res.json(out);
   } catch (err) {
     console.error('[/api/clientes/enabled]', err);
@@ -352,6 +362,8 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
       patch.agentId = b.agentId || null;
       patch.agentName = b.agentName || null;
     }
+    // Ajustes del follow up: solo si vienen.
+    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras']) if (k in b) patch[k] = b[k];
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {
@@ -397,7 +409,7 @@ app.get('/api/promesas', requirePermission('cobranzas.promesas'), async (req, re
 
 // Fuerza la revisión de promesas ahora (útil para probar sin esperar al cron).
 app.post('/api/promesas/revisar', requirePermission('cobranzas.promesas'), async (req, res) => {
-  try { res.json(await revisarPromesas()); }
+  try { res.json(await promesas.correr()); }
   catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
@@ -488,11 +500,14 @@ app.listen(PORT, async () => {
   // en contestadora (para que el cron de las 10 ya no los tome).
   cron.schedule('*/10 * * * *', () => revisarIvr().catch((e) => console.error('[cron ivr]', e.message)), opts);
 
-  // Promesas: cada día a las 9:30 (antes del cron de las 10) detecta promesas
-  // nuevas y encola al SUB-AGENTE a quienes prometieron y no pagaron.
-  const PROMESA_CRON = process.env.PROMESA_CRON || '30 9 * * *';
-  cron.schedule(PROMESA_CRON, () => revisarPromesas().catch((e) => console.error('[cron promesas]', e.message)), opts);
-  console.log(`  Promesas: ${PROMESA_CRON} (${history.TZ}) · sub-agente ${calls.followupEnabled ? 'ACTIVO' : 'no configurado (usa el principal)'} · gracia ${promesas.GRACIA_DIAS} día(s)`);
+  // Motor de promesas / follow up: cada 5 min registra las promesas de las
+  // llamadas nuevas y encola los follow ups del día (entran en los lotes del
+  // horario como las demás llamadas).
+  // Variable nueva a propósito: PROMESA_CRON (la del motor viejo, 1×/día a las
+  // 9:30) puede seguir puesta en el entorno y frenaría el follow up.
+  const PROMESA_CRON = process.env.MOTOR_PROMESAS_CRON || '*/5 * * * *';
+  cron.schedule(PROMESA_CRON, () => promesas.correr().catch((e) => console.error('[cron promesas]', e.message)), opts);
+  console.log(`  Promesas / follow up: ${PROMESA_CRON} (${history.TZ}) · follow up ${calls.followupEnabled ? 'ACTIVO' : 'no configurado (usa el principal)'}`);
 
   const st = await queue.status().catch(() => null);
   console.log(`  Llamadas: ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}`);
@@ -506,12 +521,4 @@ async function revisarIvr() {
   return ivr.sincronizar(llamadas);
 }
 
-// Promesas de pago: (1) detecta promesas nuevas en las llamadas, (2) revisa las
-// vencidas y encola al sub-agente a quien prometió y sigue debiendo.
-async function revisarPromesas() {
-  const { clientes, llamadas } = await getCachedData(true);
-  const sync = await promesas.sincronizar(llamadas, clientes);
-  const rev = await promesas.revisarIncumplidas(clientes);
-  return { ...sync, ...rev };
-}
 

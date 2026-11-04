@@ -53,10 +53,24 @@ async function enqueue(clientes, origen = 'bulk', por = null, agente = 'principa
     return { encoladas: 0, yaEnCola: 0, omitidosIvr, totalPendientes: await countPendientes() };
   }
 
-  const pendientes = await db.select(TABLE, '?select=phone&estado=eq.pendiente');
-  const yaEstan = new Set((pendientes || []).map((r) => String(r.phone)));
+  const pendientes = await db.select(TABLE, '?select=id,phone,agente&estado=eq.pendiente');
+  const pendPorTel = new Map((pendientes || []).map((r) => [String(r.phone), r]));
 
-  const nuevos = llamables.filter((c) => !yaEstan.has(c.phone));
+  // Un follow up reemplaza a la llamada normal que el cliente tuviera en cola
+  // (antes se descartaba el follow up y la promesa quedaba sin llamada).
+  let reemplazadas = 0;
+  if (agente === 'seguimiento') {
+    for (const c of llamables) {
+      const p = pendPorTel.get(String(c.phone));
+      if (p && (p.agente || 'principal') !== 'seguimiento') {
+        await db.update(TABLE, `?id=eq.${p.id}`, { estado: 'cancelada', detalle: 'reemplazada por follow up', enviada_at: new Date().toISOString() });
+        pendPorTel.delete(String(c.phone));
+        reemplazadas++;
+      }
+    }
+  }
+
+  const nuevos = llamables.filter((c) => !pendPorTel.has(String(c.phone)));
   const yaEnCola = llamables.length - nuevos.length;
 
   if (nuevos.length) {
@@ -71,6 +85,8 @@ async function enqueue(clientes, origen = 'bulk', por = null, agente = 'principa
       agente,
       estado: 'pendiente',
       encolada_por: por,
+      // Solo los follow ups: su promesa y la fecha prometida (viaja a Sword).
+      ...(c.promesa_id ? { promesa_id: String(c.promesa_id), fecha_prometida: c.fecha_prometida || null } : {}),
     }));
     // Insertar por lotes para no mandar un body gigante.
     for (let i = 0; i < rows.length; i += 500) {
@@ -79,8 +95,8 @@ async function enqueue(clientes, origen = 'bulk', por = null, agente = 'principa
   }
 
   const totalPendientes = await countPendientes();
-  console.log(`[cola] +${nuevos.length} encoladas (${yaEnCola} ya estaban${omitidosIvr ? `, ${omitidosIvr} omitidos por IVR` : ''}) · pendientes: ${totalPendientes}`);
-  return { encoladas: nuevos.length, yaEnCola, omitidosIvr, totalPendientes };
+  console.log(`[cola] +${nuevos.length} encoladas${agente === 'seguimiento' ? ' (follow up)' : ''} (${yaEnCola} ya estaban${reemplazadas ? `, ${reemplazadas} reemplazadas` : ''}${omitidosIvr ? `, ${omitidosIvr} omitidos por IVR` : ''}) · pendientes: ${totalPendientes}`);
+  return { encoladas: nuevos.length, yaEnCola, reemplazadas, omitidosIvr, totalPendientes };
 }
 
 async function countPendientes() {
@@ -97,7 +113,8 @@ async function autoEnqueueEnabled() {
   if (!phones.length) return 0;
   const { clientes } = await getCachedData(true);
   const byPhone = new Map(clientes.map((c) => [c.phone, c]));
-  const objetivo = phones.map((p) => byPhone.get(p)).filter((c) => c && c.phone);
+  // Solo a quien tiene vencido: llamar con vencido en cero confunde al cliente.
+  const objetivo = phones.map((p) => byPhone.get(p)).filter((c) => c && c.phone && (c.deuda_vencida || 0) > 0);
   const r = await enqueue(objetivo, 'cron', null, 'principal');
   console.log(`[cola] auto-encolado diario: ${r.encoladas} activos`);
   return r.encoladas;
@@ -129,21 +146,38 @@ async function tick() {
       if (Date.now() - lastLaunchAt < RATE_MS) return;
     }
 
-    const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=created_at.asc&limit=1');
+    // Primero los follow ups (tienen fecha), después el resto por orden de llegada.
+    const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=agente.desc.nullslast,created_at.asc&limit=1');
     const item = rows && rows[0];
     if (!item) return;
     lastLaunchAt = Date.now();
 
+    const agente = item.agente || 'principal';
+
+    // Deuda al momento de marcar (no la de cuando se encoló): si ya no tiene
+    // vencido, no se llama; si era un follow up, su promesa queda cumplida.
+    const { clientes } = await getCachedData();
+    const vivo = (clientes || []).find((c) => String(c.phone) === String(item.phone));
+    if (vivo && (vivo.deuda_vencida || 0) <= 0) {
+      await db.update(TABLE, `?id=eq.${item.id}`, { estado: 'cancelada', detalle: 'sin vencido al marcar', enviada_at: new Date().toISOString() });
+      if (item.promesa_id) {
+        await db.update('promesa_pago', `?id=eq.${encodeURIComponent(item.promesa_id)}`, { estado: 'cumplida', cerrada_at: new Date().toISOString(), motivo_cierre: 'sin vencido al marcar' });
+        await clienteConfig.salirEstado(String(item.phone));
+      }
+      console.log(`[cola] ⏭  ${item.phone}: sin vencido, no se llama`);
+      return;
+    }
+
     const cliente = {
       phone: item.phone,
-      name: item.nombre,
-      empresa: item.empresa,
-      deuda_total: Number(item.deuda_total) || 0,
-      deuda_vencida: Number(item.deuda_vencida) || 0,
-      credito_ofrecido: Number(item.credito_ofrecido) || 0,
+      name: (vivo && vivo.name) || item.nombre,
+      empresa: (vivo && vivo.empresa) || item.empresa,
+      deuda_total: vivo ? vivo.deuda_total : Number(item.deuda_total) || 0,
+      deuda_vencida: vivo ? vivo.deuda_vencida : Number(item.deuda_vencida) || 0,
+      credito_ofrecido: vivo ? vivo.credito_ofrecido : Number(item.credito_ofrecido) || 0,
+      fecha_prometida: item.fecha_prometida || null,
     };
 
-    const agente = item.agente || 'principal';
     try {
       await calls.triggerOne(cliente, agente);
       await marcar(item.id, 'enviada', null);
