@@ -546,11 +546,16 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                         {c.ivrTipo === 'buzon' ? '📮 Buzón' : '🏢 IVR'}
                       </span>
                     ) : c.phone ? (
-                      <button className={`switch ${c.enabled ? 'on' : ''}`} disabled={busy}
-                        title={c.enabled ? 'Activo: entra en el cron diario' : 'Inactivo: no se llama'}
-                        onClick={() => setEnabled([c.phone], !c.enabled)}>
-                        <span className="knob" />
-                      </button>
+                      <>
+                        <button className={`switch ${c.enabled ? 'on' : ''}`} disabled={busy}
+                          title={c.estadoCobro === 'promesa'
+                            ? 'Agente normal apagado: este cliente prometió una fecha y lo llama el follow up. Prenderlo cancela la promesa y vuelve a la lista normal.'
+                            : c.enabled ? 'Activo: entra en el cron diario' : 'Inactivo: no se llama'}
+                          onClick={() => setEnabled([c.phone], !c.enabled)}>
+                          <span className="knob" />
+                        </button>
+                        <QuienLlama c={c} />
+                      </>
                     ) : (
                       <span className="no-phone" title="Sin teléfono: su deuda cuenta, pero no se puede llamar">—</span>
                     )}
@@ -649,6 +654,17 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
       </div>
     </div>
   );
+}
+
+// Quién llama a este cliente ahora, bajo el interruptor del agente normal.
+function QuienLlama({ c }) {
+  const e = {
+    promesa: { txt: '↩ Follow up activo', cls: 'fu', tip: `Lo llama el agente de follow up${c.estadoDetalle ? ' el ' + fechaCorta(c.estadoDetalle) : ''} si sigue debiendo. El agente normal está apagado mientras tanto.` },
+    dice_pago: { txt: '⏸ En pausa', cls: 'pausa', tip: 'Dijo que ya pagó: ningún agente lo llama hasta que el equipo lo vuelva a prender.' },
+    escalar: { txt: '⏸ En pausa', cls: 'pausa', tip: 'Pasar a una persona: ningún agente lo llama hasta que alguien lo revise y lo vuelva a prender.' },
+  }[c.estadoCobro];
+  if (!e) return null;
+  return <div className={`quien-llama quien-llama--${e.cls}`} title={e.tip}>{e.txt}</div>;
 }
 
 // Estado de cobro que maneja el follow up automático.
