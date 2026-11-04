@@ -381,7 +381,7 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
     if (!c) continue; // ya no está en la cartera
     try {
       const fecha = String(p.fecha_prometida).slice(0, 10);
-      if ((c.deuda_vencida || 0) <= 0) {
+      if ((c.deuda_vencida || 0) <= 0 && !c._forzar) {
         if (fecha <= hoy || p.estado === 'en_seguimiento') {
           await cerrar(p, 'cumplida', 'sin vencido');
           await clienteConfig.salirEstado(phone);
@@ -443,6 +443,12 @@ async function correr({ fresco = false } = {}) {
     // clientes ficticios con vencido, para poder probar el ciclo completo.
     const clientesPorTel = new Map((data.clientes || []).filter((c) => c.phone).map((c) => [String(c.phone), c]));
     for (const c of await pruebas.clientesFicticios(data.clientes || [])) clientesPorTel.set(c.phone, c);
+    // "Forzar follow up": clientes reales a los que se les hace el follow up
+    // aunque no tengan vencido (pruebas). Siguen contando como reales.
+    for (const phone of await clienteConfig.getForzadosSet()) {
+      const c = clientesPorTel.get(phone);
+      if (c) clientesPorTel.set(phone, { ...c, _forzar: true });
+    }
     const llamadas = [...(data.llamadas || []), ...(data.llamadasPrueba || [])];
     const r1 = await procesarLlamadas(llamadas, clientesPorTel, cfg);
     const r2 = await revisarAbiertas(clientesPorTel, cfg);

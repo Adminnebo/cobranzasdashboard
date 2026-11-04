@@ -148,3 +148,18 @@ test('follow up ya pendiente en cola (sin el id de esta promesa) no cuenta como 
   assert.deepEqual(r, {});
   assert.equal(t('promesa_pago')[0].reintentos || 0, 0);
 });
+
+test('forzar follow up: sin vencido la promesa no se cierra y el follow up se marca igual', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  const alDia = { ...cliente, deuda_vencida: 0 };
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], new Map([[TEL, alDia]]), cfg);
+  // Sin forzar: se cierra como cumplida.
+  let r = await promesas.revisarAbiertas(new Map([[TEL, alDia]]), cfg);
+  assert.equal(r.cumplidas, 1);
+  // Forzado: otra promesa, queda abierta y va a la cola.
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], new Map([[TEL, alDia]]), cfg);
+  r = await promesas.revisarAbiertas(new Map([[TEL, { ...alDia, _forzar: true }]]), cfg);
+  assert.equal(r.cumplidas, undefined);
+  assert.equal(r.follow_ups_encolados, 1);
+});

@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, setClientesHorario, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
+import { setClientesEnabled, setClientesHorario, setForzarFollowUp, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
@@ -47,7 +47,7 @@ const fmtFecha = (iso) => {
 const pctVenc = (c) => (c.deuda_total > 0 ? (c.deuda_vencida / c.deuda_total) * 100 : 0);
 const pctUtil = (c) => (c.credito_ofrecido > 0 ? (c.deuda_total / c.credito_ofrecido) * 100 : 0);
 
-export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
+export default function ClientesTable({ clientes, llamadas = [], superAdmin = false, onChanged }) {
   // Llamadas agrupadas por teléfono (más recientes primero).
   const callsByPhone = useMemo(() => {
     const map = new Map();
@@ -229,6 +229,14 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
       : `${phones.length} cliente(s) vuelven al horario general.` });
     setQueueKey((k) => k + 1);
     if (onChanged) onChanged();
+  };
+
+  const forzar = (c, on) => {
+    if (on && !window.confirm(
+      `Forzar follow up a ${c.name}\n\nEl follow up lo va a llamar en la fecha que prometa aunque NO tenga vencido ` +
+      `(para probar con un cliente real). Sigue contando como cliente real.\n\n¿Continuar?`)) return;
+    return run(() => setForzarFollowUp(c.phone, on),
+      on ? `Follow up forzado para ${c.name}: lo llama aunque no tenga vencido.` : `${c.name} vuelve a la regla normal (sin vencido no se llama).`);
   };
 
   const llamar = (phones) => {
@@ -569,6 +577,12 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{c.empresa}</div>
                     <div className="cliente-tags">
                       <EstadoCobro c={c} />
+                      {c.forzarFollowUp && (
+                        <button className="horario-chip" disabled={busy} onClick={() => forzar(c, false)}
+                          title="Follow up forzado (pruebas): el follow up lo llama aunque no tenga vencido. Click para quitarlo.">
+                          🧪 Follow up forzado
+                        </button>
+                      )}
                       {c.phone && c.horario && c.horario.length > 0 && (
                         <HorarioCliente variant="chip" horario={c.horario} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
                       )}
@@ -614,6 +628,12 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                       ) : (
                         <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
                           📞 Llamar
+                        </button>
+                      )}
+                      {superAdmin && c.phone && !c.prueba && !c.forzarFollowUp && (
+                        <button className="mini-btn" disabled={busy} onClick={() => forzar(c, true)}
+                          title="Pruebas: que el follow up lo llame aunque no tenga vencido (solo super admins)">
+                          🧪
                         </button>
                       )}
                       {c.prueba && (
