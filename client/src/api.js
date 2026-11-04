@@ -68,6 +68,7 @@ export const clearChatHistory = () => del('/api/ask/history');
 
 // ── Llamadas ──
 export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enabled', { phones, enabled });
+export const setForzarFollowUp = (phone, forzar) => put('/api/clientes/forzar-follow-up', { phone, forzar });
 export const setClientesHorario = (phones, horario) => put('/api/clientes/horario', { phones, horario });
 export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trigger', { phones, origen });
 // Encola sin llamar al instante: espera turno y respeta el horario (general o propio).

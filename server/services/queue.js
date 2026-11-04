@@ -193,7 +193,8 @@ async function tick() {
     // vencido, no se llama; si era un follow up, su promesa queda cumplida.
     const { clientes } = await getCachedData();
     const vivo = (clientes || []).find((c) => String(c.phone) === String(item.phone));
-    if (vivo && (vivo.deuda_vencida || 0) <= 0) {
+    const forzado = agente === 'seguimiento' && (await clienteConfig.getForzadosSet()).has(String(item.phone));
+    if (vivo && (vivo.deuda_vencida || 0) <= 0 && !forzado) {
       await db.update(TABLE, `?id=eq.${item.id}`, { estado: 'cancelada', detalle: 'sin vencido al marcar', enviada_at: new Date().toISOString() });
       if (item.promesa_id) {
         await db.update('promesa_pago', `?id=eq.${encodeURIComponent(item.promesa_id)}`, { estado: 'cumplida', cerrada_at: new Date().toISOString(), motivo_cierre: 'sin vencido al marcar' });

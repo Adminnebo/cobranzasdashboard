@@ -133,4 +133,24 @@ async function setHorario(phones, horario, updatedBy) {
   return { updated: list.length, horario: valor };
 }
 
-module.exports = { getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, entrarEstado, salirEstado };
+// ── Follow up forzado (pruebas con clientes reales) ─────────────────────────
+/**
+ * Teléfonos con "forzar follow up": el follow up los llama aunque no tengan
+ * vencido (para probar con un cliente real al día). Vacío si sql/006 no corrió.
+ */
+async function getForzadosSet() {
+  try {
+    const rows = await db.select(TABLE, '?select=phone&forzar_follow_up=is.true');
+    return new Set((rows || []).map((r) => String(r.phone)));
+  } catch (e) { return new Set(); }
+}
+
+async function setForzado(phone, forzar, updatedBy) {
+  const p = String(phone);
+  const ex = await db.select(TABLE, `?select=phone&phone=eq.${encodeURIComponent(p)}`);
+  const row = { phone: p, forzar_follow_up: !!forzar, updated_at: new Date().toISOString(), updated_by: updatedBy || null };
+  await db.upsert(TABLE, ex && ex.length ? row : { ...row, enabled: false }, 'phone');
+  return { phone: p, forzar: !!forzar };
+}
+
+module.exports = { getForzadosSet, setForzado, getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, entrarEstado, salirEstado };

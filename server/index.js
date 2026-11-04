@@ -135,6 +135,7 @@ app.get('/api/data', async (req, res) => {
     // columnas aún no existen (sql/003 sin correr), se sigue sin estados.
     try { estadoMap = await clienteConfig.getEstadoMap(); } catch (e) { /* sin estados */ }
     const horarioMap = await clienteConfig.getHorarioMap();
+    const forzados = superAdmin ? await clienteConfig.getForzadosSet() : new Set();
     // Última llamada de cada cliente (para mostrar su status en la tabla).
     const ultimaPorTel = new Map();
     for (const ll of llamadas) {
@@ -158,6 +159,7 @@ app.get('/api/data', async (req, res) => {
         estadoDetalle: (estadoMap.get(c.phone) || {}).detalle || null,
         estadoAt: (estadoMap.get(c.phone) || {}).at || null,
         horario: horarioMap.get(c.phone) || null,
+        forzarFollowUp: forzados.has(c.phone),
         ultimaLlamada: ll
           ? {
               fecha: ll.created_at,
@@ -217,6 +219,17 @@ app.patch('/api/clientes/enabled', requirePermission('cobranzas.cliente_toggle')
   } catch (err) {
     console.error('[/api/clientes/enabled]', err);
     res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
+// "Forzar follow up" en un cliente real sin vencido (pruebas). Solo super admins.
+app.put('/api/clientes/forzar-follow-up', soloSuperAdmin, async (req, res) => {
+  try {
+    const { phone, forzar } = req.body || {};
+    if (!phone || typeof forzar !== 'boolean') return res.status(400).json({ error: 'Falta phone y forzar (boolean)' });
+    res.json(await clienteConfig.setForzado(phone, forzar, req.user ? req.user.email : null));
+  } catch (err) {
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
