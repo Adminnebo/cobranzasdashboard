@@ -4,6 +4,7 @@ import { usePaged } from '../usePaged';
 import { EMPTY_RANGE, makeInRange } from '../dateRange';
 import Pager from './Pager';
 import DateRange from './DateRange';
+import NumerosPrueba from './NumerosPrueba';
 
 const fmtDate = (iso) => {
   if (!iso) return '—';
@@ -83,6 +84,7 @@ export default function CallsTable({ llamadas }) {
           ))}
         </select>
         <DateRange value={range} onChange={setRange} />
+        <NumerosPrueba />
       </div>
       <Pager p={pager} />
       <div className="table-wrap">
@@ -107,7 +109,7 @@ export default function CallsTable({ llamadas }) {
                   <tr className={`call-row ${open ? 'open' : ''}`} onClick={() => setOpenId(open ? null : k)} style={{ cursor: 'pointer' }}>
                     <td style={{ color: 'var(--text-muted)', width: 24 }}>{open ? '▾' : '▸'}</td>
                     <td style={{ color: 'var(--text-secondary)' }}>{fmtDate(ll.created_at)}</td>
-                    <td style={{ fontWeight: 600 }}>{ll.name || ll.phone}</td>
+                    <td style={{ fontWeight: 600 }}>{ll.name || ll.phone}{ll.prueba && <span className="tag-prueba" title="Llamada a un número de prueba: no cuenta y solo la ven super admins">Prueba</span>}</td>
                     <td>
                       <span className="pill" style={{ color: intencionColor(ll.intencion_pago) }}>
                         <span className="pdot" style={{ background: intencionColor(ll.intencion_pago) }} />

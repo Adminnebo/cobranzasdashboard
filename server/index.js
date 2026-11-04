@@ -5,7 +5,8 @@ const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
 
-const { getCachedData, cacheInfo } = require('./services/cache');
+const { getCachedData, cacheInfo, invalidate: invalidarCache } = require('./services/cache');
+const pruebas = require('./services/pruebas');
 const { computeMetrics } = require('./services/metrics');
 const { analyzePortfolio } = require('./services/ai');
 const { ask } = require('./services/ask');
@@ -84,11 +85,43 @@ app.get('/api/me', async (req, res) => {
 // El resto exige acceso a la plataforma 'cobranzas'.
 app.use('/api', requirePlatform('cobranzas'));
 
+// Super admin de profiles (o sin auth, en local). Las llamadas de prueba y su
+// lista solo las ven ellos.
+async function esSuperAdmin(req) {
+  if (!authEnabled) return true;
+  if (!req.user) return false;
+  if (req.role) return req.role === 'super_admin';
+  const p = await perfilDe(req.user.id).catch(() => null);
+  return !!p && p.role === 'super_admin';
+}
+async function soloSuperAdmin(req, res, next) {
+  if (await esSuperAdmin(req)) return next();
+  return res.status(403).json({ error: 'Solo super admins' });
+}
+
+// Números de prueba: sus llamadas no cuentan y solo las ven super admins.
+app.get('/api/pruebas', soloSuperAdmin, async (req, res) => {
+  try { res.json({ numeros: await pruebas.list(true) }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+app.post('/api/pruebas', soloSuperAdmin, async (req, res) => {
+  try {
+    const numeros = await pruebas.add(req.body && req.body.phone, req.body && req.body.nota, req.user ? req.user.email : null);
+    invalidarCache();
+    res.json({ numeros });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+app.delete('/api/pruebas/:phone', soloSuperAdmin, async (req, res) => {
+  try { const numeros = await pruebas.remove(req.params.phone); invalidarCache(); res.json({ numeros }); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
 // Fuentes + métricas puras (servidas desde el caché con TTL), con el flag
 // enabled de cada cliente cruzado desde Supabase (cliente_config).
 app.get('/api/data', async (req, res) => {
   try {
-    const { clientes, llamadas, source, cachedAt, cacheAgeMs } = await getCachedData();
+    const { clientes, llamadas, llamadasPrueba, source, cachedAt, cacheAgeMs } = await getCachedData();
+    const superAdmin = await esSuperAdmin(req);
 
     let enabledMap = new Map();
     let ivrMap = new Map();
@@ -124,14 +157,18 @@ app.get('/api/data', async (req, res) => {
               notas: ll.notas || null,
               transcripcion: ll.transcripcion || null,
               grabacion: ll.grabacion || null,
+              agente: ll.agente,
+              resultado: ll.resultado || null,
             }
           : null,
       };
     });
 
     const metrics = computeMetrics(conFlag, llamadas);
-    const llamadasSlim = llamadas.map(({ _raw, ...l }) => l);
-    res.json({ source, clientes: conFlag, llamadas: llamadasSlim, metrics, cachedAt, cacheAgeMs });
+    // Las llamadas de prueba nunca entran en métricas; solo los super admins las ven.
+    const visibles = superAdmin ? [...llamadas, ...(llamadasPrueba || [])] : llamadas;
+    const llamadasSlim = visibles.map(({ _raw, ...l }) => l);
+    res.json({ source, clientes: conFlag, llamadas: llamadasSlim, metrics, cachedAt, cacheAgeMs, verPruebas: superAdmin });
   } catch (err) {
     console.error('[/api/data]', err);
     res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });

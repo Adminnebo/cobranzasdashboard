@@ -25,6 +25,7 @@ export default function ClientCalls({ calls }) {
             <button className="cc-head" onClick={() => setOpen(abierta ? null : id)}>
               <span className="cc-caret">{abierta ? '▾' : '▸'}</span>
               <span className="cc-fecha">{fmt(ll.created_at)}</span>
+              {ll.prueba && <span className="tag-prueba">Prueba</span>}
               <span className="pill" style={{ color: intencionColor(ll.intencion_pago) }}>
                 <span className="pdot" style={{ background: intencionColor(ll.intencion_pago) }} />
                 {intencionLabel(ll.intencion_pago)}

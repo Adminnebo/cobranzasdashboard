@@ -9,6 +9,7 @@
  */
 
 const demo = require('./demoData');
+const { tipoDeAgente } = require('../services/agents');
 
 // ── Utilidades ──────────────────────────────────────────────────────────────
 const num = (v) => {
@@ -108,16 +109,38 @@ function normalizeCliente(r) {
 
 function normalizeLlamada(r) {
   const lc = lcIndex(r);
+  const agenteId = str(pick(lc, 'agente_id', 'agent_id') || '');
+  const agenteNombre = str(pick(lc, 'agente_nombre', 'agent_name') || '');
+  const { tipo, inferido } = tipoDeAgente(agenteId, agenteNombre);
+  const duracion = pick(lc, 'duracion_seg', 'duration');
+  const resultado = str(pick(lc, 'resultado', 'outcome') || '') || null;
+  // Sword marca 'answered' cuando atendió alguien. Cualquier otro resultado
+  // (no_answer, …) es "no contesta", diga lo que diga el análisis de la IA:
+  // a veces resume como "contestada" una llamada en la que solo habló el agente.
+  const noContesto = !!resultado && resultado !== 'answered';
   return {
     id: pick(lc, 'id', 'call_id') ?? undefined,
     created_at: str(pick(lc, 'created_at', 'fecha', 'timestamp', 'date') || ''),
     phone: phoneKey(pick(lc, 'phone', 'telefono', 'celular', 'numero', 'phone_number')),
     name: str(pick(lc, 'name', 'nombre', 'cliente') || ''),
     fecha_pago: str(pick(lc, 'fecha_pago', 'payment_date', 'promesa_fecha') || ''),
-    intencion_pago: normalizeIntencion(pick(lc, 'intencion_pago', 'intencion', 'intent', 'payment_intent')),
+    intencion_pago: noContesto
+      ? 'no_contesta'
+      : normalizeIntencion(pick(lc, 'intencion_pago', 'intencion', 'intent', 'payment_intent')),
     notas: str(pick(lc, 'notas', 'notes', 'resumen', 'summary') || ''),
     transcripcion: str(pick(lc, 'transcripcion', 'transcript', 'transcripcion_texto') || ''),
     grabacion: str(pick(lc, 'grabacion', 'recording', 'recording_url', 'audio_url') || ''),
+    // Quién llamó y cómo terminó (columnas nuevas de Cobranzas_call_logs; las
+    // filas anteriores no las traen y quedan como del agente principal).
+    agente: tipo,
+    agente_inferido: inferido,
+    agente_id: agenteId || null,
+    agente_nombre: agenteNombre || null,
+    sword_call_id: str(pick(lc, 'sword_call_id') || '') || null,
+    duracion_seg: duracion === undefined ? null : num(duracion),
+    resultado,
+    motivo_fin: str(pick(lc, 'motivo_fin', 'ended_reason', 'endedreason') || '') || null,
+    etapa: str(pick(lc, 'etapa', 'stage') || '') || null,
     // Fila original completa (incluye columnas no mapeadas, p.ej. follow_up).
     _raw: r,
   };
@@ -174,11 +197,15 @@ async function fetchFromSupabase() {
   };
 }
 
+// Las llamadas demo pasan por la misma normalización (agente, resultado…),
+// pero conservan su teléfono tal cual para seguir cruzando con los clientes demo.
+const demoLlamadas = () => demo.llamadas.map((l) => ({ ...normalizeLlamada(l), phone: l.phone }));
+
 // ── Selector ────────────────────────────────────────────────────────────────
 async function getData() {
   const useDemo = (process.env.USE_DEMO_DATA ?? 'true') !== 'false';
   if (useDemo) {
-    return { clientes: demo.clientes, llamadas: demo.llamadas, source: 'demo' };
+    return { clientes: demo.clientes, llamadas: demoLlamadas(), source: 'demo' };
   }
   if (process.env.N8N_WEBHOOK_CLIENTES) {
     return { ...(await fetchFromN8n()), source: 'n8n' };
@@ -187,7 +214,7 @@ async function getData() {
     return { ...(await fetchFromSupabase()), source: 'supabase' };
   }
   // Sin fuente configurada -> demo como salvavidas.
-  return { clientes: demo.clientes, llamadas: demo.llamadas, source: 'demo (sin fuente configurada)' };
+  return { clientes: demo.clientes, llamadas: demoLlamadas(), source: 'demo (sin fuente configurada)' };
 }
 
 module.exports = { getData, normalizeCliente, normalizeLlamada, toArray };

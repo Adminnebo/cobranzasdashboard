@@ -155,6 +155,16 @@ const llamadas = [
     transcripcion: 'AI: Su vencido es 3,980 pesos.\nUser: En la quincena veo qué le abono.\nAI: ¿Un monto aproximado?\nUser: No le sé decir todavía.',
     grabacion: 'https://app.swordaisolutions.com/api/recordings/public/demo-0016',
   },
+  // Follow up: Camila Reyes prometió "el próximo 15" (llamada 1) y no pagó.
+  {
+    id: 17, created_at: '2026-07-15T14:20:11+00:00', phone: '+525581001001', name: 'Camila Reyes',
+    fecha_pago: 'el viernes', intencion_pago: 'fecha_especifica',
+    notas: 'No pudo pagar el 15 porque no le llegó el cheque. Se compromete a pagar el viernes.',
+    transcripcion: 'AI: Le llamo porque quedó en pagar el 15 y todavía vemos el balance vencido.\nUser: Sí, no me llegó el cheque. El viernes sin falta.\nAI: Perfecto, lo dejo anotado para el viernes.',
+    grabacion: 'https://app.swordaisolutions.com/api/recordings/public/demo-0017',
+    agente_id: 'cmrksxyke000bf69lt9nw4322', agente_nombre: 'JH Cobranzas (Follow Up)',
+    duracion_seg: 48.2, resultado: 'answered', motivo_fin: 'assistant-ended-call', etapa: 'Con intencion de pagar',
+  },
 ];
 
 module.exports = { clientes, llamadas };
