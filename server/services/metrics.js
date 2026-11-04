@@ -49,7 +49,12 @@ function computeMetrics(clientes, llamadas) {
     }
   }
 
-  const clientesContactados = clientes.filter((c) => llamadaPorTel.has(c.phone)).length;
+  // Contactado = alguien atendió en al menos una llamada (no cuenta las que
+  // Sword marcó como no contestadas ni las clasificadas "no contesta").
+  const contestaron = new Set(
+    llamadas.filter((ll) => ll.phone && ll.intencion_pago !== 'no_contesta' && (!ll.resultado || ll.resultado === 'answered')).map((ll) => ll.phone),
+  );
+  const clientesContactados = clientes.filter((c) => contestaron.has(c.phone)).length;
 
   // Totales de cartera.
   const deudaTotal = round2(clientes.reduce((s, c) => s + (c.deuda_total || 0), 0));

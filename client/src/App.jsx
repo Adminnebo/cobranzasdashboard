@@ -7,6 +7,8 @@ import BarList from './components/BarList';
 import Donut from './components/Donut';
 import CarteraTable from './components/CarteraTable';
 import ClientesTable from './components/ClientesTable';
+import CallsTable from './components/CallsTable';
+import PromesasView from './components/PromesasView';
 import AiPanel from './components/AiPanel';
 import HistoryCard from './components/HistoryCard';
 import AssistantView from './components/AssistantView';
@@ -20,6 +22,8 @@ import { getAuthToken } from './auth/token';
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊', perm: 'cobranzas.cartera' },
   { id: 'clientes', label: 'Clientes y llamadas', icon: '👥', perm: 'cobranzas.clientes' },
+  { id: 'llamadas', label: 'Llamadas', icon: '📞', perm: 'cobranzas.clientes' },
+  { id: 'promesas', label: 'Promesas', icon: '⏳', perm: 'cobranzas.promesas' },
   { id: 'asistente', label: 'Asistente IA', icon: '🤖', perm: 'cobranzas.asistente' },
 ];
 
@@ -294,6 +298,14 @@ export default function App() {
           <ClientesTable clientes={data.clientes} llamadas={data.llamadas} onChanged={reloadData} />
         </div>
       )}
+
+      {tab === 'llamadas' && puede('cobranzas.clientes') && (
+        <div className="card">
+          <CallsTable llamadas={data.llamadas} />
+        </div>
+      )}
+
+      {tab === 'promesas' && puede('cobranzas.promesas') && <PromesasView />}
 
       {tab === 'asistente' && puede('cobranzas.asistente') && <AssistantView />}
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { intencionColor, intencionLabel } from '../constants';
 import CallDetail from './CallDetail';
+import AgenteTag from './AgenteTag';
 
 const fmt = (iso) => {
   if (!iso) return '';
@@ -16,7 +17,9 @@ export default function ClientCalls({ calls }) {
   }
   return (
     <div className="client-calls">
-      <div className="cc-title">{calls.length} llamada{calls.length === 1 ? '' : 's'}</div>
+      <div className="cc-title">
+        {calls.length} llamada{calls.length === 1 ? '' : 's'} · 📞 {calls.filter((l) => l.agente !== 'seguimiento').length} de cobranzas · ↩ {calls.filter((l) => l.agente === 'seguimiento').length} de follow up
+      </div>
       {calls.map((ll, i) => {
         const id = ll.id ?? (ll.phone + '-' + ll.created_at + '-' + i);
         const abierta = open === id;
@@ -25,6 +28,7 @@ export default function ClientCalls({ calls }) {
             <button className="cc-head" onClick={() => setOpen(abierta ? null : id)}>
               <span className="cc-caret">{abierta ? '▾' : '▸'}</span>
               <span className="cc-fecha">{fmt(ll.created_at)}</span>
+              <AgenteTag ll={ll} />
               {ll.prueba && <span className="tag-prueba">Prueba</span>}
               <span className="pill" style={{ color: intencionColor(ll.intencion_pago) }}>
                 <span className="pdot" style={{ background: intencionColor(ll.intencion_pago) }} />

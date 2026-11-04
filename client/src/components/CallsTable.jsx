@@ -5,6 +5,7 @@ import { EMPTY_RANGE, makeInRange } from '../dateRange';
 import Pager from './Pager';
 import DateRange from './DateRange';
 import NumerosPrueba from './NumerosPrueba';
+import AgenteTag from './AgenteTag';
 
 const fmtDate = (iso) => {
   if (!iso) return '—';
@@ -39,6 +40,7 @@ function Transcript({ text }) {
 export default function CallsTable({ llamadas }) {
   const [q, setQ] = useState('');
   const [intencion, setIntencion] = useState('');
+  const [agente, setAgente] = useState('');
   const [range, setRange] = useState(EMPTY_RANGE);
   const [openId, setOpenId] = useState(null);
 
@@ -48,6 +50,8 @@ export default function CallsTable({ llamadas }) {
     return llamadas.filter((ll) => {
       if (!inRange(ll.created_at)) return false;
       if (intencion && ll.intencion_pago !== intencion) return false;
+      if (agente === 'seguimiento' && ll.agente !== 'seguimiento') return false;
+      if (agente === 'cobranzas' && ll.agente === 'seguimiento') return false;
       if (!t) return true;
       return (
         (ll.name || '').toLowerCase().includes(t) ||
@@ -55,7 +59,7 @@ export default function CallsTable({ llamadas }) {
         String(ll.phone || '').includes(t.replace(/\D/g, ''))
       );
     });
-  }, [llamadas, q, intencion, range]);
+  }, [llamadas, q, intencion, agente, range]);
 
   const { slice, pager } = usePaged(filtered, 25);
 
@@ -83,6 +87,11 @@ export default function CallsTable({ llamadas }) {
             <option key={k} value={k}>{v.label}</option>
           ))}
         </select>
+        <select className="search select" value={agente} onChange={(e) => setAgente(e.target.value)}>
+          <option value="">Todos los agentes</option>
+          <option value="cobranzas">📞 Cobranzas</option>
+          <option value="seguimiento">↩ Follow up</option>
+        </select>
         <DateRange value={range} onChange={setRange} />
         <NumerosPrueba />
       </div>
@@ -94,6 +103,7 @@ export default function CallsTable({ llamadas }) {
               <th></th>
               <th>Fecha</th>
               <th>Cliente</th>
+              <th>Agente</th>
               <th>Intención</th>
               <th>Fecha de pago</th>
               <th>Notas</th>
@@ -110,6 +120,7 @@ export default function CallsTable({ llamadas }) {
                     <td style={{ color: 'var(--text-muted)', width: 24 }}>{open ? '▾' : '▸'}</td>
                     <td style={{ color: 'var(--text-secondary)' }}>{fmtDate(ll.created_at)}</td>
                     <td style={{ fontWeight: 600 }}>{ll.name || ll.phone}{ll.prueba && <span className="tag-prueba" title="Llamada a un número de prueba: no cuenta y solo la ven super admins">Prueba</span>}</td>
+                    <td><AgenteTag ll={ll} /></td>
                     <td>
                       <span className="pill" style={{ color: intencionColor(ll.intencion_pago) }}>
                         <span className="pdot" style={{ background: intencionColor(ll.intencion_pago) }} />
@@ -122,7 +133,7 @@ export default function CallsTable({ llamadas }) {
                   </tr>
                   {open && (
                     <tr className="call-detail-row">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <div className="call-detail">
                           {ll.grabacion ? (
                             <div className="call-audio">
@@ -147,7 +158,7 @@ export default function CallsTable({ llamadas }) {
               );
             })}
             {slice.length === 0 && (
-              <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Sin resultados.</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Sin resultados.</td></tr>
             )}
           </tbody>
         </table>

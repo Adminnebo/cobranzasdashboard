@@ -508,6 +508,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
               const abierta = openCall === c.phone && c.ultimaLlamada;
               const clientCalls = callsByPhone.get(c.phone) || [];
               const nCalls = clientCalls.length;
+              const nFu = clientCalls.filter((l) => l.agente === 'seguimiento').length;
               const rowKey = (c.codigo || c.id || i) + '-' + i;
               return (
                 <Fragment key={rowKey}>
@@ -568,7 +569,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                         </span>
                         <span className="ult-meta">
                           {abierta ? '▾ ' : '▸ '}{fmtFecha(c.ultimaLlamada.fecha)}
-                          {nCalls > 1 && <> · <strong>{nCalls} llamadas</strong></>}
+                          {' · '}<strong title={`${nCalls - nFu} del agente de cobranzas · ${nFu} del follow up`}>📞 {nCalls - nFu}{nFu ? <> · ↩ {nFu}</> : null}</strong>
                         </span>
                       </button>
                     ) : (

@@ -28,3 +28,10 @@ export const CATEGORIA = {
 };
 
 export const probColor = (p) => (p >= 65 ? 'var(--good)' : p >= 35 ? 'var(--warning)' : 'var(--critical)');
+
+// Agente que hizo la llamada (lo manda el servidor en cada llamada).
+export const AGENTE = {
+  cobranzas:   { label: 'Cobranzas', icon: '📞', tip: 'Agente de cobranzas (primera llamada de cobro)' },
+  seguimiento: { label: 'Follow up', icon: '↩', tip: 'Agente de follow up (llama a quien prometió pagar)' },
+};
+export const agenteDe = (ll) => AGENTE[ll && ll.agente === 'seguimiento' ? 'seguimiento' : 'cobranzas'];

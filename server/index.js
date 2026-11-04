@@ -407,6 +407,37 @@ app.get('/api/promesas', requirePermission('cobranzas.promesas'), async (req, re
   catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
+// Lista de promesas para la pestaña Promesas, con el nombre de la cartera.
+// Las de números de prueba solo las ven los super admins (marcadas "prueba").
+app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (req, res) => {
+  try {
+    const [rows, { clientes }, setPruebas, superAdmin, cfg] = await Promise.all([
+      promesas.lista(), getCachedData(), pruebas.phones(), esSuperAdmin(req), schedule.get(),
+    ]);
+    const porTel = new Map((clientes || []).map((c) => [String(c.phone), c]));
+    const out = [];
+    for (const r of rows) {
+      const prueba = setPruebas.has(pruebas.phoneKey(r.phone));
+      if (prueba && !superAdmin) continue;
+      const c = porTel.get(String(r.phone));
+      out.push({
+        id: r.id, phone: r.phone, prueba,
+        nombre: (c && c.name) || r.nombre || (prueba ? 'Prueba' : null),
+        empresa: c ? c.empresa : null,
+        vencidoHoy: c ? c.deuda_vencida : null,
+        estado: r.estado, intento: r.intento || 1, reintentos: r.reintentos || 0,
+        fechaPrometida: r.fecha_prometida, textoOriginal: r.texto_original,
+        prometidaEl: r.fecha_llamada, montoAlPrometer: r.monto_al_prometer,
+        agente: r.agente, origen: r.origen,
+        proximoIntento: r.proximo_intento_at, seguimientoAt: r.seguimiento_at,
+        cerradaAt: r.cerrada_at, motivoCierre: r.motivo_cierre,
+        anteriorId: r.promesa_anterior_id, createdAt: r.created_at,
+      });
+    }
+    res.json({ promesas: out, tope: cfg.promesaTope });
+  } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
 // Fuerza la revisión de promesas ahora (útil para probar sin esperar al cron).
 app.post('/api/promesas/revisar', requirePermission('cobranzas.promesas'), async (req, res) => {
   try { res.json(await promesas.correr()); }

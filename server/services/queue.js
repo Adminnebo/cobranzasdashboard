@@ -206,7 +206,7 @@ async function marcar(id, estado, detalle) {
 // ── Estado / control ─────────────────────────────────────────────────────────
 async function status() {
   const [pend, hoy] = await Promise.all([
-    db.select(TABLE, '?select=id,phone,nombre,created_at&estado=eq.pendiente&order=created_at.asc'),
+    db.select(TABLE, '?select=id,phone,nombre,agente,created_at&estado=eq.pendiente&order=agente.desc.nullslast,created_at.asc'),
     db.select(TABLE, `?select=id,estado&estado=in.(enviada,error)&enviada_at=gte.${new Date(Date.now() - 86400000).toISOString()}`),
   ]);
   const pendientes = pend || [];
@@ -216,7 +216,8 @@ async function status() {
   const activas = vapi.vapiEnabled ? await vapi.activeCalls().catch(() => null) : null;
   return {
     pendientes: pendientes.length,
-    proximo: pendientes[0] ? { phone: pendientes[0].phone, nombre: pendientes[0].nombre } : null,
+    proximo: pendientes[0] ? { phone: pendientes[0].phone, nombre: pendientes[0].nombre, agente: pendientes[0].agente || 'principal' } : null,
+    followUpsEnCola: pendientes.filter((r) => r.agente === 'seguimiento').length,
     enviadas24h: ultimas.filter((r) => r.estado === 'enviada').length,
     errores24h: ultimas.filter((r) => r.estado === 'error').length,
     scheduleEnabled: cfg.enabled,
