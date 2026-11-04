@@ -359,6 +359,11 @@ async function revisarAbiertas(clientesPorTel, cfg) {
       }
       if (p.estado === 'pendiente') {
         if (fecha > hoy) continue;
+        // Prometió hoy para hoy ("pago hoy"): el follow up va al día siguiente,
+        // no minutos después de colgar. Los números de prueba no esperan, para
+        // poder probar el ciclo completo en el día.
+        const diaPromesa = p.fecha_llamada ? ymdInTz(new Date(p.fecha_llamada)) : null;
+        if (diaPromesa === hoy && !c._prueba) continue;
         if (fecha < corteViejas) {
           await cerrar(p, 'vieja', `más de ${cfg.promesaMaxAtraso} días de atraso`);
           await clienteConfig.salirEstado(phone);
@@ -405,7 +410,7 @@ async function correr() {
     for (const n of numerosPrueba) {
       const phone = pruebas.phoneKey(n.phone);
       if (!clientesPorTel.has(phone)) {
-        clientesPorTel.set(phone, { phone, name: 'Prueba', empresa: 'Prueba Nebo', deuda_total: 15000, deuda_vencida: 12500, credito_ofrecido: 0 });
+        clientesPorTel.set(phone, { phone, name: 'Prueba', empresa: 'Prueba Nebo', deuda_total: 15000, deuda_vencida: 12500, credito_ofrecido: 0, _prueba: true });
       }
     }
     const llamadas = [...(data.llamadas || []), ...(data.llamadasPrueba || [])];
