@@ -439,6 +439,12 @@ async function cancelarPorCambioManual(phones, por) {
   }
 }
 
+/** Lista para la pestaña Promesas (más recientes primero). */
+async function lista(limit = 300) {
+  const rows = await db.select(TABLE, `?select=*&order=created_at.desc&limit=${Math.min(1000, Math.max(1, limit))}`);
+  return rows || [];
+}
+
 /** Resumen para el panel. */
 async function resumen() {
   const rows = await db.select(TABLE, '?select=id,estado,fecha_prometida,phone,nombre,monto_al_prometer,intento,reintentos,proximo_intento_at&order=fecha_prometida.desc&limit=500');
@@ -457,7 +463,7 @@ async function resumen() {
 }
 
 module.exports = {
-  correr, resumen, cancelarPorCambioManual,
+  correr, resumen, lista, cancelarPorCambioManual,
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,
   // puras (pruebas)

@@ -40,7 +40,8 @@ export default function QueuePanel({ refreshKey }) {
                   ? <> · <strong>{q.activas ?? '?'}/{q.maxConcurrent}</strong> activas</>
                   : <> · 1/min · faltan ~<strong>{eta}</strong></>)
               : <> · <span className="queue-paused">pausada fuera de horario</span></>}
-            {q.proximo && <> · siguiente: {q.proximo.nombre || q.proximo.phone}</>}
+            {q.followUpsEnCola > 0 && <> · <strong>↩ {num(q.followUpsEnCola)}</strong> de follow up</>}
+            {q.proximo && <> · siguiente: {q.proximo.nombre || q.proximo.phone}{q.proximo.agente === 'seguimiento' ? ' (follow up)' : ''}</>}
           </>
         ) : (
           <>
