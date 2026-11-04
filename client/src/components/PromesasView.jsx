@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchPromesasLista } from '../api';
+import { fetchPromesasLista, revisarPromesasAhora } from '../api';
 import { money } from '../format';
 
 // Estados de una promesa (los pone el motor del follow up).
@@ -44,14 +44,26 @@ export default function PromesasView() {
   const [err, setErr] = useState(null);
   const [verTodas, setVerTodas] = useState(false);
   const [q, setQ] = useState('');
+  const [at, setAt] = useState(null);
+  const [revisando, setRevisando] = useState(false);
+
+  const load = () => fetchPromesasLista()
+    .then((d) => { setData(d); setErr(null); setAt(new Date()); })
+    .catch((e) => setErr(e.message));
 
   useEffect(() => {
-    let vivo = true;
-    const load = () => fetchPromesasLista().then((d) => { if (vivo) { setData(d); setErr(null); } }).catch((e) => vivo && setErr(e.message));
     load();
-    const id = setInterval(load, 30000);
-    return () => { vivo = false; clearInterval(id); };
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
   }, []);
+
+  // Corre el motor ya (lee las llamadas recién terminadas) y recarga la lista.
+  const ahora = async () => {
+    setRevisando(true);
+    try { await revisarPromesasAhora(); } catch (e) { setErr(e.message); }
+    await load();
+    setRevisando(false);
+  };
 
   const lista = data ? data.promesas : [];
   const cuenta = useMemo(() => {
@@ -95,7 +107,12 @@ export default function PromesasView() {
           <input type="checkbox" checked={verTodas} onChange={(e) => setVerTodas(e.target.checked)} />
           Ver también las cerradas
         </label>
-        <span className="sched-tz">Tope: {data.tope} promesas incumplidas seguidas · se actualiza cada 30 s</span>
+        <button className="btn" onClick={ahora} disabled={revisando} title="Lee las llamadas recién terminadas y actualiza las promesas ahora">
+          {revisando ? 'Actualizando…' : '↻ Actualizar ahora'}
+        </button>
+        <span className="sched-tz">
+          Tope: {data.tope} promesas incumplidas seguidas · actualizado {at ? at.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'} (cada 15 s)
+        </span>
       </div>
       <div className="table-wrap">
         <table>

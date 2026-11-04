@@ -94,6 +94,7 @@ export const fetchData = () => get('/api/data');
 // Números de prueba (solo super admins): sus llamadas no cuentan y se ocultan al resto.
 export const fetchPruebas = () => get('/api/pruebas');
 export const fetchPromesasLista = () => get('/api/promesas/lista');
+export const revisarPromesasAhora = () => post('/api/promesas/revisar', {});
 export const addPrueba = (phone, nota) => post('/api/pruebas', { phone, nota });
 export const removePrueba = (phone) => del(`/api/pruebas/${encodeURIComponent(phone)}`);
 export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '?refresh=1' : ''}`);
