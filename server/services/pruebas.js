@@ -68,4 +68,22 @@ function separar(llamadas, setPruebas) {
   return { reales, pruebas };
 }
 
-module.exports = { list, phones, add, remove, separar, phoneKey };
+/**
+ * Los números de prueba no están en la cartera de JH: se usan como clientes
+ * ficticios con vencido (para el motor de promesas, la cola y la lista de
+ * Clientes que ven los super admins). Nunca entran en métricas.
+ * @param {Array} clientes  cartera real (no se duplica un teléfono que ya esté)
+ */
+async function clientesFicticios(clientes = []) {
+  const reales = new Set(clientes.map((c) => String(c.phone)));
+  // El nombre es la nota del número (se edita en 🧪 Números de prueba).
+  return (await list())
+    .map((n) => ({ phone: phoneKey(n.phone), nombre: (n.nota || '').trim() }))
+    .filter(({ phone }) => phone && !reales.has(phone))
+    .map(({ phone, nombre }) => ({
+      phone, name: nombre || 'Número de prueba', empresa: 'Prueba Nebo', codigo: `PRUEBA-${phone.slice(-4)}`,
+      deuda_total: 15000, deuda_vencida: 12500, credito_ofrecido: 0, _prueba: true,
+    }));
+}
+
+module.exports = { list, phones, add, remove, separar, phoneKey, clientesFicticios };

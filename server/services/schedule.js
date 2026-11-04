@@ -37,6 +37,8 @@ const DEFAULT = {
   // nunca de este rango (que nadie lo llame a las 6 de la mañana).
   horarioClienteDesde: '08:00',
   horarioClienteHasta: '19:00',
+  // "Pago hoy": hora a la que sale el follow up de una promesa hecha hoy para hoy.
+  pagoHoyHora: '17:00',
 };
 
 const hhmm = (v, def) => (/^\d{2}:\d{2}$/.test(String(v || '').slice(0, 5)) ? String(v).slice(0, 5) : def);
@@ -96,6 +98,7 @@ async function get(force = false) {
         reintentoHoras: entero(row.reintento_horas, DEFAULT.reintentoHoras, 1, 8),
         horarioClienteDesde: hhmm(row.horario_cliente_desde, DEFAULT.horarioClienteDesde),
         horarioClienteHasta: hhmm(row.horario_cliente_hasta, DEFAULT.horarioClienteHasta),
+        pagoHoyHora: hhmm(row.pago_hoy_hora, DEFAULT.pagoHoyHora),
         tz: TZ,
       }
     : { ...DEFAULT, lastEnqueueDate: null, tz: TZ };
@@ -183,6 +186,8 @@ async function set(patch, by) {
         return { horario_cliente_desde: desde, horario_cliente_hasta: hasta };
       })()
     : {};
+  // Igual con la hora de "pago hoy" (sql/005).
+  if ('pagoHoyHora' in patch) rango.pago_hoy_hora = hhmm(next.pagoHoyHora, DEFAULT.pagoHoyHora);
   await db.upsert(TABLE, {
     id: 1,
     ...rango,

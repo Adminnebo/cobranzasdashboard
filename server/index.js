@@ -174,6 +174,25 @@ app.get('/api/data', async (req, res) => {
     });
 
     const metrics = computeMetrics(conFlag, llamadas);
+    // Números de prueba como clientes ficticios, al final y solo para super
+    // admins (después de las métricas: no cuentan en nada).
+    if (superAdmin) {
+      for (const f of await pruebas.clientesFicticios(clientes).catch(() => [])) {
+        const { _prueba, ...c } = f;
+        const est = estadoMap.get(c.phone) || {};
+        let ll = null;
+        for (const x of llamadasPrueba || []) if (x.phone === c.phone && (!ll || new Date(x.created_at) > new Date(ll.created_at))) ll = x;
+        conFlag.push({
+          ...c, prueba: true, enabled: enabledMap.get(c.phone) === true, ivr: false,
+          estadoCobro: est.estado || null, estadoDetalle: est.detalle || null, estadoAt: est.at || null,
+          horario: horarioMap.get(c.phone) || null,
+          ultimaLlamada: ll
+            ? { fecha: ll.created_at, intencion: ll.intencion_pago, fechaPago: ll.fecha_pago || null, notas: ll.notas || null,
+                transcripcion: ll.transcripcion || null, grabacion: ll.grabacion || null, agente: ll.agente, resultado: ll.resultado || null }
+            : null,
+        });
+      }
+    }
     // Las llamadas de prueba nunca entran en métricas; solo los super admins las ven.
     const visibles = superAdmin ? [...llamadas, ...(llamadasPrueba || [])] : llamadas;
     const llamadasSlim = visibles.map(({ _raw, ...l }) => l);
@@ -288,12 +307,14 @@ app.post('/api/history/snapshot', async (req, res) => {
 // dentro del horario laboral). La cola vive en Supabase y sobrevive reinicios.
 app.post('/api/calls/trigger', requirePermission('cobranzas.llamadas'), async (req, res) => {
   try {
-    const { phones, origen } = req.body || {};
+    const { phones, origen, encolar } = req.body || {};
     if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
     if (!calls.callsEnabled) return res.status(503).json({ error: 'Llamadas no configuradas (falta N8N_CALL_URL)' });
 
     const { clientes } = await getCachedData();
-    const byPhone = new Map(clientes.map((c) => [c.phone, c]));
+    // Los números de prueba también se pueden llamar/encolar (como clientes ficticios).
+    const ficticios = await pruebas.clientesFicticios(clientes).catch(() => []);
+    const byPhone = new Map([...clientes, ...ficticios].map((c) => [c.phone, c]));
     const objetivo = phones.map((p) => byPhone.get(String(p))).filter((c) => c && c.phone);
     if (!objetivo.length) return res.status(404).json({ error: 'Ningún cliente coincide con esos teléfonos' });
 
@@ -309,8 +330,9 @@ app.post('/api/calls/trigger', requirePermission('cobranzas.llamadas'), async (r
       return res.status(409).json({ error: `Omitido: ${omitidosIvr} cliente(s) están marcados como IVR y no se llaman.` });
     }
 
-    // Una sola: se dispara al momento (no espera turno en la cola).
-    if (permitidos.length === 1) {
+    // Una sola: se dispara al momento (no espera turno en la cola), salvo que
+    // pidan encolarla (respeta el horario general y el propio del cliente).
+    if (permitidos.length === 1 && !encolar) {
       const r = await calls.triggerBatch(permitidos, 'manual', por);
       return res.json({ ...r, inmediata: true, omitidosIvr });
     }
@@ -378,7 +400,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
       patch.agentName = b.agentName || null;
     }
     // Ajustes del follow up: solo si vienen.
-    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta']) if (k in b) patch[k] = b[k];
+    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'pagoHoyHora']) if (k in b) patch[k] = b[k];
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {
@@ -430,6 +452,8 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
       promesas.lista(), getCachedData(), pruebas.phones(), esSuperAdmin(req), schedule.get(),
     ]);
     const porTel = new Map((clientes || []).map((c) => [String(c.phone), c]));
+    // Los números de prueba con su nombre y su vencido ficticio (solo super admins).
+    if (superAdmin) for (const f of await pruebas.clientesFicticios(clientes || []).catch(() => [])) porTel.set(f.phone, f);
     const out = [];
     for (const r of rows) {
       const prueba = setPruebas.has(pruebas.phoneKey(r.phone));
@@ -449,7 +473,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         anteriorId: r.promesa_anterior_id, createdAt: r.created_at,
       });
     }
-    res.json({ promesas: out, tope: cfg.promesaTope });
+    res.json({ promesas: out, tope: cfg.promesaTope, pagoHoyHora: cfg.pagoHoyHora });
   } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 

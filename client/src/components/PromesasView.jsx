@@ -29,8 +29,20 @@ const momento = (iso) => {
 };
 
 /** Qué sigue con una promesa abierta, en palabras. */
-function siguiente(p) {
-  if (p.estado === 'pendiente') return `Follow up el ${dia(p.fechaPrometida)} si sigue debiendo`;
+const ymdRD = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santo_Domingo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+const horaRD = (d) => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Santo_Domingo', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+
+function siguiente(p, pagoHoyHora) {
+  if (p.estado === 'pendiente') {
+    // "Pago hoy": prometió hoy para hoy -> follow up a la hora de la tarde (o mañana si prometió después).
+    const hoy = ymdRD(new Date());
+    if (pagoHoyHora && p.prometidaEl && ymdRD(new Date(p.prometidaEl)) === hoy && String(p.fechaPrometida).slice(0, 10) === hoy) {
+      return horaRD(new Date(p.prometidaEl)) >= pagoHoyHora
+        ? `Prometió pagar hoy después de las ${pagoHoyHora}: follow up mañana si sigue debiendo`
+        : `Prometió pagar hoy: follow up hoy a las ${pagoHoyHora} si sigue debiendo`;
+    }
+    return `Follow up el ${dia(p.fechaPrometida)} si sigue debiendo`;
+  }
   if (p.estado === 'en_seguimiento') {
     if (p.proximoIntento) return `No contestó · reintento ${p.reintentos} de 2: ${momento(p.proximoIntento)}`;
     return `Llamada de follow up en cola o en curso (desde ${momento(p.seguimientoAt)})`;
@@ -156,7 +168,7 @@ export default function PromesasView() {
                   </td>
                   <td>{p.intento}.ª{p.intento >= data.tope ? ' (última)' : ''}</td>
                   <td className="num">{p.vencidoHoy == null ? '—' : money(p.vencidoHoy)}</td>
-                  <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{siguiente(p)}</td>
+                  <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{siguiente(p, data.pagoHoyHora)}</td>
                 </tr>
               );
             })}

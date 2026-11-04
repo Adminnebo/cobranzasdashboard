@@ -71,3 +71,17 @@ test('llamadaKey: por id de la fila, o teléfono + hora si no hay id', () => {
   assert.equal(llamadaKey({ id: 1121, phone: '3395658425' }), 'log:1121');
   assert.equal(llamadaKey({ phone: '3395658425', created_at: 'x' }), '3395658425|x');
 });
+
+test('pago hoy: espera hasta la hora de la tarde; si prometió después, pasa al día siguiente', () => {
+  const { pagoHoyEspera } = require('../services/promesas');
+  const rd = (hhmm, dia = '2026-11-04') => new Date(`${dia}T${hhmm}:00-04:00`);
+  const cfg = { pagoHoyHora: '17:00' };
+  const hoy = '2026-11-04';
+  assert.equal(pagoHoyEspera(rd('10:00').toISOString(), hoy, cfg, rd('10:02')), true, 'prometió a las 10: no a los 2 min');
+  assert.equal(pagoHoyEspera(rd('10:00').toISOString(), hoy, cfg, rd('16:59')), true);
+  assert.equal(pagoHoyEspera(rd('10:00').toISOString(), hoy, cfg, rd('17:00')), false, 'a las 17:00 sale');
+  assert.equal(pagoHoyEspera(rd('17:30').toISOString(), hoy, cfg, rd('17:32')), true, 'prometió tarde: espera');
+  assert.equal(pagoHoyEspera(rd('17:30').toISOString(), hoy, cfg, rd('23:00')), true, 'todo el día');
+  assert.equal(pagoHoyEspera(rd('17:30', '2026-11-03').toISOString(), hoy, cfg, rd('09:00')), false, 'al día siguiente ya no espera');
+  assert.equal(pagoHoyEspera(rd('10:00').toISOString(), hoy, {}, rd('10:02')), false, 'sin hora configurada no espera');
+});

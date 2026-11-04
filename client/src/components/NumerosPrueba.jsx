@@ -40,7 +40,7 @@ export default function NumerosPrueba({ onChanged }) {
       {open && (
         <div className="sched-pop">
           <div className="sched-lbl">Números de prueba</div>
-          <div className="sched-tz">Sus llamadas no cuentan en métricas ni promesas, y solo las ven los super admins.</div>
+          <div className="sched-tz">Sus llamadas no cuentan en métricas, y solo los super admins las ven. Aparecen en Clientes como clientes ficticios (vencido $12,500) con este nombre; no se suben a la base de JH. Para cambiar el nombre, agrega el mismo número con el nombre nuevo.</div>
           {numeros.length === 0 && <div className="sched-tz">Sin números.</div>}
           {numeros.map((n) => (
             <div key={n.phone} className="sched-block">
@@ -51,7 +51,7 @@ export default function NumerosPrueba({ onChanged }) {
           ))}
           <div className="sched-block">
             <input className="search" placeholder="Teléfono" value={tel} onChange={(e) => setTel(e.target.value)} style={{ width: 130 }} />
-            <input className="search" placeholder="Nota (opcional)" value={nota} onChange={(e) => setNota(e.target.value)} style={{ flex: 1 }} />
+            <input className="search" placeholder="Nombre (sale en Clientes)" value={nota} onChange={(e) => setNota(e.target.value)} style={{ flex: 1 }} />
             <button className="btn" disabled={busy || !tel.trim()} onClick={agregar}>Agregar</button>
           </div>
           {err && <div className="sched-err">{err}</div>}

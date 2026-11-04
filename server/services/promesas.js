@@ -51,6 +51,24 @@ const ymdInTz = (d = new Date()) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const sumarDias = (ymd, n) => new Date(new Date(ymd + 'T12:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10);
 
+const minsDe = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+
+/**
+ * "Pago hoy": la promesa se hizo hoy para hoy. El follow up no sale minutos
+ * después de colgar sino a la hora de la tarde de Ajustes (pagoHoyHora, 17:00).
+ * Si prometió después de esa hora, espera al día siguiente.
+ * Sin pagoHoyHora (solo en pruebas) no espera.
+ * @returns {boolean} true si todavía no toca encolar el follow up
+ */
+function pagoHoyEspera(fechaLlamada, hoy, cfg, ahora = new Date()) {
+  if (!fechaLlamada || !cfg || !cfg.pagoHoyHora) return false;
+  const d = new Date(fechaLlamada);
+  if (ymdInTz(d) !== hoy) return false;                    // prometió otro día
+  const hora = minsDe(cfg.pagoHoyHora);
+  if (schedule.partsInTz(d).mins >= hora) return true;    // prometió tarde: mañana
+  return schedule.partsInTz(ahora).mins < hora;            // aún no es la hora
+}
+
 /** Medianoche (inicio) de un día YYYY-MM-DD en la zona del panel, como Date. */
 function inicioDelDia(ymd) {
   const off = new Intl.DateTimeFormat('en-US', { timeZone: TZ, timeZoneName: 'shortOffset' })
@@ -350,8 +368,8 @@ async function encolarFollowUp(p, cliente) {
   return true;
 }
 
-async function revisarAbiertas(clientesPorTel, cfg) {
-  const hoy = ymdInTz();
+async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date() } = {}) {
+  const hoy = ymdInTz(ahoraFecha);
   const corteViejas = sumarDias(hoy, -cfg.promesaMaxAtraso);
   const ahora = Date.now();
   const abiertas = await abiertasPorTelefono();
@@ -373,11 +391,9 @@ async function revisarAbiertas(clientesPorTel, cfg) {
       }
       if (p.estado === 'pendiente') {
         if (fecha > hoy) continue;
-        // Prometió hoy para hoy ("pago hoy"): el follow up va al día siguiente,
-        // no minutos después de colgar. Los números de prueba no esperan, para
-        // poder probar el ciclo completo en el día.
-        const diaPromesa = p.fecha_llamada ? ymdInTz(new Date(p.fecha_llamada)) : null;
-        if (diaPromesa === hoy && !c._prueba) continue;
+        // Prometió hoy para hoy ("pago hoy"): el follow up sale a la hora de la
+        // tarde configurada, no minutos después de colgar (también los de prueba).
+        if (pagoHoyEspera(p.fecha_llamada, hoy, cfg, ahoraFecha)) continue;
         if (fecha < corteViejas) {
           await cerrar(p, 'vieja', `más de ${cfg.promesaMaxAtraso} días de atraso`);
           await clienteConfig.salirEstado(phone);
@@ -422,16 +438,11 @@ async function correr({ fresco = false } = {}) {
   if (!db.dbEnabled) return { omitida: 'Supabase no configurado' };
   corriendo = true;
   try {
-    const [data, cfg, numerosPrueba] = await Promise.all([getCachedData(fresco), schedule.get(true), pruebas.list()]);
+    const [data, cfg] = await Promise.all([getCachedData(fresco), schedule.get(true)]);
     // Los números de prueba no están en la cartera: el motor los trata como
     // clientes ficticios con vencido, para poder probar el ciclo completo.
     const clientesPorTel = new Map((data.clientes || []).filter((c) => c.phone).map((c) => [String(c.phone), c]));
-    for (const n of numerosPrueba) {
-      const phone = pruebas.phoneKey(n.phone);
-      if (!clientesPorTel.has(phone)) {
-        clientesPorTel.set(phone, { phone, name: 'Prueba', empresa: 'Prueba Nebo', deuda_total: 15000, deuda_vencida: 12500, credito_ofrecido: 0, _prueba: true });
-      }
-    }
+    for (const c of await pruebas.clientesFicticios(data.clientes || [])) clientesPorTel.set(c.phone, c);
     const llamadas = [...(data.llamadas || []), ...(data.llamadasPrueba || [])];
     const r1 = await procesarLlamadas(llamadas, clientesPorTel, cfg);
     const r2 = await revisarAbiertas(clientesPorTel, cfg);
@@ -486,5 +497,5 @@ module.exports = {
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,
   // puras (pruebas)
-  decidir, fechaDeLlamada, proximoReintento, inicioDelDia, llamadaKey, MAX_REINTENTOS,
+  decidir, fechaDeLlamada, proximoReintento, inicioDelDia, llamadaKey, pagoHoyEspera, MAX_REINTENTOS,
 };
