@@ -411,12 +411,18 @@ async function revisarAbiertas(clientesPorTel, cfg) {
 // ── Vuelta completa ──────────────────────────────────────────────────────────
 let corriendo = false;
 
-async function correr() {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.fresco]  fuerza a leer las llamadas de n8n ahora (botón
+ *   "Actualizar ahora"). Sin él usa el caché del panel (≤45 s), así correr cada
+ *   minuto no suma consultas a n8n.
+ */
+async function correr({ fresco = false } = {}) {
   if (corriendo) return { omitida: 'ya está corriendo' };
   if (!db.dbEnabled) return { omitida: 'Supabase no configurado' };
   corriendo = true;
   try {
-    const [data, cfg, numerosPrueba] = await Promise.all([getCachedData(true), schedule.get(true), pruebas.list()]);
+    const [data, cfg, numerosPrueba] = await Promise.all([getCachedData(fresco), schedule.get(true), pruebas.list()]);
     // Los números de prueba no están en la cartera: el motor los trata como
     // clientes ficticios con vencido, para poder probar el ciclo completo.
     const clientesPorTel = new Map((data.clientes || []).filter((c) => c.phone).map((c) => [String(c.phone), c]));

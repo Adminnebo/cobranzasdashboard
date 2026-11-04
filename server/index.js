@@ -440,7 +440,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
 
 // Fuerza la revisión de promesas ahora (útil para probar sin esperar al cron).
 app.post('/api/promesas/revisar', requirePermission('cobranzas.promesas'), async (req, res) => {
-  try { res.json(await promesas.correr()); }
+  try { res.json(await promesas.correr({ fresco: true })); }
   catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
@@ -531,12 +531,12 @@ app.listen(PORT, async () => {
   // en contestadora (para que el cron de las 10 ya no los tome).
   cron.schedule('*/10 * * * *', () => revisarIvr().catch((e) => console.error('[cron ivr]', e.message)), opts);
 
-  // Motor de promesas / follow up: cada 5 min registra las promesas de las
+  // Motor de promesas / follow up: cada minuto registra las promesas de las
   // llamadas nuevas y encola los follow ups del día (entran en los lotes del
   // horario como las demás llamadas).
   // Variable nueva a propósito: PROMESA_CRON (la del motor viejo, 1×/día a las
   // 9:30) puede seguir puesta en el entorno y frenaría el follow up.
-  const PROMESA_CRON = process.env.MOTOR_PROMESAS_CRON || '*/5 * * * *';
+  const PROMESA_CRON = process.env.MOTOR_PROMESAS_CRON || '* * * * *';
   cron.schedule(PROMESA_CRON, () => promesas.correr().catch((e) => console.error('[cron promesas]', e.message)), opts);
   console.log(`  Promesas / follow up: ${PROMESA_CRON} (${history.TZ}) · follow up ${calls.followupEnabled ? 'ACTIVO' : 'no configurado (usa el principal)'}`);
 
