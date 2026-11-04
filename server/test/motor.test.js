@@ -123,3 +123,27 @@ test('cliente real que promete "hoy": el follow up no sale hasta el día siguien
   const r2 = await promesas.revisarAbiertas(real, cfg);
   assert.equal(r2.follow_ups_encolados, 1);
 });
+
+test('si la cola no acepta el follow up (IVR), la promesa se cierra sin llamada, no como "no contestó"', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], clientes(), cfg);
+  fake.tablas.cliente_config[0].ivr = true; // cae en IVR antes del follow up
+  const r = await promesas.revisarAbiertas(clientes(), cfg);
+  assert.equal(r.sin_llamada, 1);
+  assert.equal(t('promesa_pago')[0].estado, 'sin_llamada');
+  assert.equal(t('promesa_pago')[0].reintentos || 0, 0);
+  assert.equal(config().enabled, false);
+  assert.equal(config().estado_cobro, null);
+});
+
+test('follow up ya pendiente en cola (sin el id de esta promesa) no cuenta como sin resultado', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], clientes(), cfg);
+  await promesas.revisarAbiertas(clientes(), cfg);
+  t('llamada_cola')[0].promesa_id = 'otra';
+  const r = await promesas.revisarAbiertas(clientes(), cfg);
+  assert.deepEqual(r, {});
+  assert.equal(t('promesa_pago')[0].reintentos || 0, 0);
+});

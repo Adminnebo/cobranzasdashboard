@@ -323,17 +323,31 @@ async function aplicar(d, { ll, abierta, cliente, cfg, abiertas }) {
 }
 
 // ── 2. Promesas abiertas ─────────────────────────────────────────────────────
-async function ultimaEnCola(promesaId) {
-  const rows = await db.select('llamada_cola', `?select=estado,enviada_at,created_at&promesa_id=eq.${encodeURIComponent(promesaId)}&order=created_at.desc&limit=1`);
+// Último follow up en cola del cliente (por teléfono: si ya tenía uno pendiente,
+// la cola no crea otro y ese no lleva el id de esta promesa).
+async function ultimaEnCola(phone) {
+  const rows = await db.select('llamada_cola', `?select=estado,enviada_at,created_at&phone=eq.${encodeURIComponent(phone)}&agente=eq.seguimiento&order=created_at.desc&limit=1`);
   return (rows && rows[0]) || null;
 }
 
+/**
+ * Encola el follow up. Si la cola no lo acepta (número marcado como IVR o
+ * buzón), la promesa se cierra sin llamada en vez de contarse como "no
+ * contestó", y el cliente queda fuera del follow up y apagado.
+ * @returns {boolean} si quedó en cola
+ */
 async function encolarFollowUp(p, cliente) {
-  await queue.enqueue(
+  const r = await queue.enqueue(
     [{ ...cliente, promesa_id: String(p.id), fecha_prometida: p.fecha_prometida }],
     'seguimiento', null, 'seguimiento',
   );
+  if (!r.encoladas && !r.yaEnCola) {
+    await cerrar(p, 'sin_llamada', r.omitidosIvr ? 'no se llama: número marcado como IVR o buzón' : 'la cola no aceptó la llamada');
+    await clienteConfig.salirEstado(String(p.phone), { apagado: true });
+    return false;
+  }
   await db.update(TABLE, `?id=eq.${p.id}`, { estado: 'en_seguimiento', seguimiento_at: new Date().toISOString(), proximo_intento_at: null });
+  return true;
 }
 
 async function revisarAbiertas(clientesPorTel, cfg) {
@@ -370,17 +384,16 @@ async function revisarAbiertas(clientesPorTel, cfg) {
           sumar('viejas');
           continue;
         }
-        await encolarFollowUp(p, c);
-        sumar('follow_ups_encolados');
+        sumar((await encolarFollowUp(p, c)) ? 'follow_ups_encolados' : 'sin_llamada');
         continue;
       }
       // en_seguimiento
       if (p.proximo_intento_at) {
-        if (Date.parse(p.proximo_intento_at) <= ahora) { await encolarFollowUp(p, c); sumar('reintentos_encolados'); }
+        if (Date.parse(p.proximo_intento_at) <= ahora) sumar((await encolarFollowUp(p, c)) ? 'reintentos_encolados' : 'sin_llamada');
         continue;
       }
       // Enviado y sin resultado: tras unas horas cuenta como no contestado.
-      const enCola = await ultimaEnCola(p.id);
+      const enCola = await ultimaEnCola(phone);
       if (enCola && enCola.estado === 'pendiente') continue;
       const desde = Date.parse((enCola && (enCola.enviada_at || enCola.created_at)) || p.seguimiento_at || 0);
       const sinResultado = !enCola || enCola.estado === 'error' || ahora - desde > SIN_RESULTADO_HORAS * 3600000;

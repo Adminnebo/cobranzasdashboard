@@ -13,6 +13,7 @@ const ESTADOS = {
   escalada:       { label: 'Pasar a una persona', color: 'var(--critical)' },
   vieja:          { label: 'Vencida sin llamar', color: 'var(--text-muted)' },
   cancelada:      { label: 'Cancelada a mano',   color: 'var(--text-muted)' },
+  sin_llamada:    { label: 'No se pudo llamar',  color: 'var(--text-muted)' },
 };
 const estadoDe = (e) => ESTADOS[e] || { label: e || '—', color: 'var(--text-muted)' };
 
