@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, setClientesHorario, triggerCalls, resetIvr, createList, updateList } from '../api';
+import { setClientesEnabled, setClientesHorario, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
@@ -557,7 +557,10 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                   </td>
                   <td style={{ color: 'var(--text-muted)' }}>{start + i + 1}</td>
                   <td>
-                    <div style={{ fontWeight: 600 }}>{c.name}</div>
+                    <div style={{ fontWeight: 600 }}>
+                      {c.name}
+                      {c.prueba && <span className="tag-prueba" title="Número de prueba: cliente ficticio, solo lo ven los super admins y no cuenta en nada">Prueba</span>}
+                    </div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{c.empresa}</div>
                     <div className="cliente-tags">
                       <EstadoCobro c={c} />
@@ -606,6 +609,13 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                       ) : (
                         <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
                           📞 Llamar
+                        </button>
+                      )}
+                      {c.prueba && (
+                        <button className="mini-btn" disabled={busy}
+                          title="Lo pone en la cola sin llamar al instante: espera turno y respeta el horario (el general o el suyo)"
+                          onClick={() => run(() => enqueueCalls([c.phone]), (r) => (r.encoladas ? 'Encolado: sale cuando le toque según el horario.' : 'Ya estaba en la cola.'))}>
+                          ➕ Cola
                         </button>
                       )}
                       {c.phone && !(c.horario && c.horario.length) && (

@@ -11,8 +11,9 @@ export default function SchedulePanel({ onSaved }) {
   const ref = useRef(null);
 
   const rangoInicial = useRef(null);
+  const pagoHoyInicial = useRef(null);
   useEffect(() => {
-    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; setCfg(c); }).catch(() => {});
+    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; pagoHoyInicial.current = c.pagoHoyHora; setCfg(c); }).catch(() => {});
   }, []);
   // Los agentes se cargan al abrir el panel (no en cada render de la app).
   useEffect(() => {
@@ -49,6 +50,8 @@ export default function SchedulePanel({ onSaved }) {
     const rango = `${cfg.horarioClienteDesde}-${cfg.horarioClienteHasta}` !== rangoInicial.current
       ? { horarioClienteDesde: cfg.horarioClienteDesde, horarioClienteHasta: cfg.horarioClienteHasta }
       : {};
+    // Igual la hora de "pago hoy" (sql/005).
+    if (cfg.pagoHoyHora && cfg.pagoHoyHora !== pagoHoyInicial.current) rango.pagoHoyHora = cfg.pagoHoyHora;
     setSaving(true);
     try {
       const saved = await saveSchedule({
@@ -58,6 +61,7 @@ export default function SchedulePanel({ onSaved }) {
         promesaTope: Number(cfg.promesaTope), promesaMaxAtraso: Number(cfg.promesaMaxAtraso), reintentoHoras: Number(cfg.reintentoHoras),
       });
       rangoInicial.current = `${saved.horarioClienteDesde}-${saved.horarioClienteHasta}`;
+      pagoHoyInicial.current = saved.pagoHoyHora;
       setCfg(saved);
       setOpen(false);
       if (onSaved) onSaved();
@@ -114,6 +118,10 @@ export default function SchedulePanel({ onSaved }) {
             <label className="sched-num">
               <span>Días de atraso máximo para todavía llamar</span>
               <input type="number" min="0" max="60" value={cfg.promesaMaxAtraso ?? 7} onChange={(e) => set({ promesaMaxAtraso: e.target.value })} />
+            </label>
+            <label className="sched-num">
+              <span>Si promete pagar "hoy", el follow up sale ese día a las (si promete después, al día siguiente)</span>
+              <input type="time" style={{ width: 'auto' }} value={cfg.pagoHoyHora || '17:00'} onChange={(e) => set({ pagoHoyHora: e.target.value })} />
             </label>
             <label className="sched-num">
               <span>Horas para reintentar si no contesta (2.º intento al día siguiente)</span>

@@ -70,6 +70,8 @@ export const clearChatHistory = () => del('/api/ask/history');
 export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enabled', { phones, enabled });
 export const setClientesHorario = (phones, horario) => put('/api/clientes/horario', { phones, horario });
 export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trigger', { phones, origen });
+// Encola sin llamar al instante: espera turno y respeta el horario (general o propio).
+export const enqueueCalls = (phones) => post('/api/calls/trigger', { phones, origen: 'manual', encolar: true });
 export const fetchQueue = () => get('/api/calls/queue');
 export const cancelQueue = () => del('/api/calls/queue');
 export const resetIvr = (phone) => post(`/api/clientes/${phone}/ivr/reset`, {});
