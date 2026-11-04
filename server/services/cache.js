@@ -6,6 +6,7 @@
  */
 
 const { getData } = require('../data/source');
+const pruebas = require('./pruebas');
 
 const TTL = parseInt(process.env.DATA_CACHE_TTL_MS || '45000', 10); // 45s por defecto
 
@@ -13,10 +14,17 @@ let cache = { at: 0, data: null };
 let inflight = null;
 
 async function refresh() {
-  const data = await getData();
+  const raw = await getData();
+  // Las llamadas a números de prueba salen de `llamadas` (no cuentan en nada) y
+  // quedan aparte en `llamadasPrueba`, que solo /api/data muestra a super admins.
+  const { reales, pruebas: dePrueba } = pruebas.separar(raw.llamadas || [], await pruebas.phones());
+  const data = { ...raw, llamadas: reales, llamadasPrueba: dePrueba };
   cache = { at: Date.now(), data };
   return data;
 }
+
+/** Fuerza el próximo acceso a recargar (p.ej. al cambiar la lista de pruebas). */
+function invalidate() { cache = { at: 0, data: cache.data }; }
 
 /**
  * Devuelve los datos cacheados. Si el TTL venció (o force=true), refresca.
@@ -43,4 +51,4 @@ function cacheInfo() {
   return { ageMs: cache.data ? Date.now() - cache.at : null, ttlMs: TTL, warmed: !!cache.data };
 }
 
-module.exports = { getCachedData, cacheInfo, TTL };
+module.exports = { getCachedData, cacheInfo, invalidate, TTL };

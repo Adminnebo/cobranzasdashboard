@@ -90,6 +90,11 @@ export const updateUser = (id, payload) => patch(`/api/users/${id}`, payload);
 export const deleteUser = (id) => del(`/api/users/${id}`);
 
 export const fetchData = () => get('/api/data');
+
+// Números de prueba (solo super admins): sus llamadas no cuentan y se ocultan al resto.
+export const fetchPruebas = () => get('/api/pruebas');
+export const addPrueba = (phone, nota) => post('/api/pruebas', { phone, nota });
+export const removePrueba = (phone) => del(`/api/pruebas/${encodeURIComponent(phone)}`);
 export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '?refresh=1' : ''}`);
 export const fetchHistory = () => get('/api/history');
 export const fetchHealth = () => get('/api/health');
