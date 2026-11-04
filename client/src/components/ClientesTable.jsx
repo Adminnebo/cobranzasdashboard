@@ -2,12 +2,13 @@ import { Fragment, useMemo, useState } from 'react';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, triggerCalls, resetIvr, createList, updateList } from '../api';
+import { setClientesEnabled, setClientesHorario, triggerCalls, resetIvr, createList, updateList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
 import ListsPanel from './ListsPanel';
 import ClientCalls from './ClientCalls';
+import HorarioCliente from './HorarioCliente';
 
 const sortValue = {
   name: (c) => (c.name || '').toLowerCase(),
@@ -100,6 +101,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
       if (f.estado === 'promesa' && c.estadoCobro !== 'promesa') return false;
       if (f.estado === 'dice_pago' && c.estadoCobro !== 'dice_pago') return false;
       if (f.estado === 'escalar' && c.estadoCobro !== 'escalar') return false;
+      if (f.estado === 'horario' && !(c.horario && c.horario.length)) return false;
       if (f.estado === 'ivr_empresa' && !(c.ivr && c.ivrTipo !== 'buzon')) return false;
       if (f.estado === 'buzon' && !(c.ivr && c.ivrTipo === 'buzon')) return false;
       if (f.estado === 'sin_ivr' && c.ivr) return false;
@@ -219,6 +221,16 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
     run(() => setClientesEnabled(phones, enabled),
       `${phones.length} cliente(s) ${enabled ? 'activados' : 'desactivados'}.`);
 
+  // Lanza el error al editor de horario para que lo muestre ahí mismo.
+  const guardarHorario = async (phones, horario) => {
+    await setClientesHorario(phones, horario);
+    setMsg({ type: 'ok', text: horario
+      ? `Horario propio guardado para ${phones.length} cliente(s).`
+      : `${phones.length} cliente(s) vuelven al horario general.` });
+    setQueueKey((k) => k + 1);
+    if (onChanged) onChanged();
+  };
+
   const llamar = (phones) => {
     const h = Math.floor(phones.length / 60), mm = phones.length % 60;
     const eta = h ? `${h}h ${mm}min` : `${mm} min`;
@@ -321,6 +333,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
           <option value="promesa">⏳ Con promesa (los llama el follow up)</option>
           <option value="dice_pago">💬 Dice que pagó</option>
           <option value="escalar">🙋 Pasar a una persona</option>
+          <option value="horario">🕘 Con horario propio</option>
           <option value="ivr">IVR y Buzón (todos)</option>
           <option value="ivr_empresa">Solo IVR (empresa)</option>
           <option value="buzon">Solo Buzón (voicemail)</option>
@@ -472,6 +485,7 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
           )}
           <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, true)}>Activar</button>
           <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, false)}>Desactivar</button>
+          <HorarioCliente variant="bulk" count={selArr.length} disabled={busy} onSave={(h) => guardarHorario(selArr, h)} />
           <button className="btn call-btn" disabled={busy} onClick={() => llamar(selArr)}>
             {busy ? 'Lanzando…' : `📞 Llamar a ${num(selArr.length)}`}
           </button>
@@ -545,7 +559,12 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                   <td>
                     <div style={{ fontWeight: 600 }}>{c.name}</div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{c.empresa}</div>
-                    <EstadoCobro c={c} />
+                    <div className="cliente-tags">
+                      <EstadoCobro c={c} />
+                      {c.phone && c.horario && c.horario.length > 0 && (
+                        <HorarioCliente variant="chip" horario={c.horario} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
+                      )}
+                    </div>
                   </td>
                   <td style={{ fontVariantNumeric: 'tabular-nums', color: c.phone ? undefined : 'var(--text-muted)' }}>
                     {c.phone ? phoneFmt(c.phone) : 'sin teléfono'}
@@ -588,6 +607,9 @@ export default function ClientesTable({ clientes, llamadas = [], onChanged }) {
                         <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
                           📞 Llamar
                         </button>
+                      )}
+                      {c.phone && !(c.horario && c.horario.length) && (
+                        <HorarioCliente variant="btn" disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
                       )}
                       {activeList && c.phone && (
                         enLista(c) ? (

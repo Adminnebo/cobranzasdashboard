@@ -10,7 +10,10 @@ export default function SchedulePanel({ onSaved }) {
   const [agentes, setAgentes] = useState(null);   // { available, agents, error }
   const ref = useRef(null);
 
-  useEffect(() => { fetchSchedule().then(setCfg).catch(() => {}); }, []);
+  const rangoInicial = useRef(null);
+  useEffect(() => {
+    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; setCfg(c); }).catch(() => {});
+  }, []);
   // Los agentes se cargan al abrir el panel (no en cada render de la app).
   useEffect(() => {
     if (!open || agentes) return;
@@ -39,13 +42,22 @@ export default function SchedulePanel({ onSaved }) {
       if (!b.start || !b.end || b.end <= b.start) { setErr('Cada bloque debe tener fin mayor que inicio.'); return; }
     }
     if (cfg.enabled && !cfg.blocks.length) { setErr('Agrega al menos un bloque horario.'); return; }
+    if (cfg.horarioClienteDesde && cfg.horarioClienteHasta && cfg.horarioClienteHasta <= cfg.horarioClienteDesde) {
+      setErr('El rango del horario por cliente tiene que terminar después de empezar.'); return;
+    }
+    // El rango solo se manda si cambió (así no hace falta sql/004 para guardar lo demás).
+    const rango = `${cfg.horarioClienteDesde}-${cfg.horarioClienteHasta}` !== rangoInicial.current
+      ? { horarioClienteDesde: cfg.horarioClienteDesde, horarioClienteHasta: cfg.horarioClienteHasta }
+      : {};
     setSaving(true);
     try {
       const saved = await saveSchedule({
+        ...rango,
         enabled: cfg.enabled, weekdaysOnly: cfg.weekdaysOnly, autoEnqueue: cfg.autoEnqueue, blocks: cfg.blocks,
         agentId: cfg.agentId || null, agentName: cfg.agentName || null,
         promesaTope: Number(cfg.promesaTope), promesaMaxAtraso: Number(cfg.promesaMaxAtraso), reintentoHoras: Number(cfg.reintentoHoras),
       });
+      rangoInicial.current = `${saved.horarioClienteDesde}-${saved.horarioClienteHasta}`;
       setCfg(saved);
       setOpen(false);
       if (onSaved) onSaved();
@@ -107,6 +119,19 @@ export default function SchedulePanel({ onSaved }) {
               <span>Horas para reintentar si no contesta (2.º intento al día siguiente)</span>
               <input type="number" min="1" max="8" value={cfg.reintentoHoras ?? 2} onChange={(e) => set({ reintentoHoras: e.target.value })} />
             </label>
+          </div>
+
+          {/* Rango dentro del cual puede caer el horario propio de un cliente. */}
+          <div className="sched-blocks">
+            <div className="sched-lbl">Horario propio de un cliente</div>
+            <div className="sched-tz" style={{ marginBottom: 7 }}>
+              Un cliente puede tener su propio horario (en Clientes, 🕘). Puede salirse de los bloques de arriba, pero siempre dentro de este rango.
+            </div>
+            <div className="sched-block">
+              <input type="time" value={cfg.horarioClienteDesde || '08:00'} onChange={(e) => set({ horarioClienteDesde: e.target.value })} />
+              <span>a</span>
+              <input type="time" value={cfg.horarioClienteHasta || '19:00'} onChange={(e) => set({ horarioClienteHasta: e.target.value })} />
+            </div>
           </div>
 
           {/* Agente de voz que hace las llamadas: se manda como agentId en el webhook. */}

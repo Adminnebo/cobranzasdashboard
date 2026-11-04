@@ -120,12 +120,47 @@ async function autoEnqueueEnabled() {
   return r.encoladas;
 }
 
+/**
+ * Elige la próxima llamada de la cola según el horario de cada cliente:
+ *   1. quien tiene horario propio y está dentro de él (se aprovecha su ventana);
+ *   2. follow ups (tienen fecha);
+ *   3. el resto por orden de llegada.
+ * Quien tiene horario propio cerrado espera; quien no tiene, sigue el general.
+ * @param rows     pendientes de llamada_cola
+ * @param horarios Map<phone, bloques> (cliente_config.horario)
+ */
+function elegirSiguiente(rows, horarios, cfg, d = new Date()) {
+  const general = schedule.inWindow(cfg, d);
+  const candidatos = [];
+  for (const r of rows || []) {
+    const h = horarios.get(String(r.phone));
+    const propio = h && schedule.bloquesCliente(cfg, h);
+    const abierto = propio ? schedule.abiertoPara(cfg, h, d) : general;
+    if (abierto) candidatos.push({ r, propio: !!propio });
+  }
+  candidatos.sort((a, b) =>
+    (b.propio - a.propio)
+    || ((b.r.agente === 'seguimiento') - (a.r.agente === 'seguimiento'))
+    || String(a.r.created_at).localeCompare(String(b.r.created_at)));
+  return candidatos.length ? candidatos[0].r : null;
+}
+
+/** ¿Hay alguna ventana abierta ahora (la general o la de algún cliente)? */
+function algunaAbierta(cfg, horarios, d = new Date()) {
+  if (schedule.inWindow(cfg, d)) return true;
+  for (const h of horarios.values()) if (schedule.bloquesCliente(cfg, h) && schedule.abiertoPara(cfg, h, d)) return true;
+  return false;
+}
+
 async function tick() {
   if (corriendo) return;                       // evita solapamiento
   if (!calls.callsEnabled) return;             // sin N8N_CALL_URL no hace nada
 
   const cfg = await schedule.get();
-  if (!schedule.inWindow(cfg)) return;         // fuera de los bloques: pausa
+  if (!cfg.enabled) return;
+  const horarios = await clienteConfig.getHorarioMap();
+  // Fuera del horario general y de todos los horarios propios: pausa.
+  if (!algunaAbierta(cfg, horarios)) return;
 
   corriendo = true;
   try {
@@ -146,9 +181,9 @@ async function tick() {
       if (Date.now() - lastLaunchAt < RATE_MS) return;
     }
 
-    // Primero los follow ups (tienen fecha), después el resto por orden de llegada.
-    const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=agente.desc.nullslast,created_at.asc&limit=1');
-    const item = rows && rows[0];
+    // Horario propio abierto > follow ups > orden de llegada (ver elegirSiguiente).
+    const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=created_at.asc');
+    const item = elegirSiguiente(rows, horarios, cfg);
     if (!item) return;
     lastLaunchAt = Date.now();
 
@@ -206,22 +241,32 @@ async function marcar(id, estado, detalle) {
 // ── Estado / control ─────────────────────────────────────────────────────────
 async function status() {
   const [pend, hoy] = await Promise.all([
-    db.select(TABLE, '?select=id,phone,nombre,agente,created_at&estado=eq.pendiente&order=agente.desc.nullslast,created_at.asc'),
+    db.select(TABLE, '?select=id,phone,nombre,agente,created_at&estado=eq.pendiente&order=created_at.asc'),
     db.select(TABLE, `?select=id,estado&estado=in.(enviada,error)&enviada_at=gte.${new Date(Date.now() - 86400000).toISOString()}`),
   ]);
   const pendientes = pend || [];
   const ultimas = hoy || [];
   const cfg = await schedule.get();
+  const horarios = await clienteConfig.getHorarioMap();
   // Consulta las llamadas activas ahora (si VAPI está configurado).
   const activas = vapi.vapiEnabled ? await vapi.activeCalls().catch(() => null) : null;
+  const sig = elegirSiguiente(pendientes, horarios, cfg);
+  // En cola con horario propio cerrado ahora: esperan su ventana.
+  const esperandoHorario = pendientes.filter((r) => {
+    const h = horarios.get(String(r.phone));
+    return h && schedule.bloquesCliente(cfg, h) && !schedule.abiertoPara(cfg, h);
+  }).length;
   return {
     pendientes: pendientes.length,
-    proximo: pendientes[0] ? { phone: pendientes[0].phone, nombre: pendientes[0].nombre, agente: pendientes[0].agente || 'principal' } : null,
+    proximo: sig ? { phone: sig.phone, nombre: sig.nombre, agente: sig.agente || 'principal', horarioPropio: horarios.has(String(sig.phone)) } : null,
+    esperandoHorario,
+    clientesConHorario: horarios.size,
     followUpsEnCola: pendientes.filter((r) => r.agente === 'seguimiento').length,
     enviadas24h: ultimas.filter((r) => r.estado === 'enviada').length,
     errores24h: ultimas.filter((r) => r.estado === 'error').length,
     scheduleEnabled: cfg.enabled,
     enHorario: schedule.inWindow(cfg),
+    algunaAbierta: algunaAbierta(cfg, horarios),
     horario: horarioTexto(cfg),
     modo: vapi.vapiEnabled ? 'concurrencia' : 'ritmo',
     maxConcurrent: MAX_CONCURRENT,
@@ -239,4 +284,4 @@ async function cancelarTodo() {
   return { canceladas: n };
 }
 
-module.exports = { enqueue, tick, status, cancelarTodo, autoEnqueueEnabled, TZ };
+module.exports = { enqueue, tick, status, cancelarTodo, autoEnqueueEnabled, elegirSiguiente, algunaAbierta, TZ };

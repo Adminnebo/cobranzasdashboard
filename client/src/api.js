@@ -68,6 +68,7 @@ export const clearChatHistory = () => del('/api/ask/history');
 
 // ── Llamadas ──
 export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enabled', { phones, enabled });
+export const setClientesHorario = (phones, horario) => put('/api/clientes/horario', { phones, horario });
 export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trigger', { phones, origen });
 export const fetchQueue = () => get('/api/calls/queue');
 export const cancelQueue = () => del('/api/calls/queue');
