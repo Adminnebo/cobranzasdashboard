@@ -83,13 +83,16 @@ async function entrarEstado(phone, estado, detalle) {
   }, 'phone');
 }
 
-/** Saca al cliente del estado de cobro: vuelve a la lista normal como estaba. */
-async function salirEstado(phone) {
+/**
+ * Saca al cliente del estado de cobro: vuelve a la lista normal como estaba.
+ * Con { apagado: true } queda apagado (p.ej. su número cayó en IVR).
+ */
+async function salirEstado(phone, { apagado = false } = {}) {
   const r = await filaDe(phone);
   if (!r || !r.estado_cobro) return;
   await db.upsert(TABLE, {
     phone: String(phone),
-    enabled: !!r.enabled_antes,
+    enabled: apagado ? false : !!r.enabled_antes,
     estado_cobro: null,
     estado_detalle: null,
     estado_at: new Date().toISOString(),
