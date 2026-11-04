@@ -134,6 +134,7 @@ app.get('/api/data', async (req, res) => {
     // Estado de cobro (promesa / dice que pagó / pasar a una persona). Si las
     // columnas aún no existen (sql/003 sin correr), se sigue sin estados.
     try { estadoMap = await clienteConfig.getEstadoMap(); } catch (e) { /* sin estados */ }
+    const horarioMap = await clienteConfig.getHorarioMap();
     // Última llamada de cada cliente (para mostrar su status en la tabla).
     const ultimaPorTel = new Map();
     for (const ll of llamadas) {
@@ -156,6 +157,7 @@ app.get('/api/data', async (req, res) => {
         estadoCobro: (estadoMap.get(c.phone) || {}).estado || null,
         estadoDetalle: (estadoMap.get(c.phone) || {}).detalle || null,
         estadoAt: (estadoMap.get(c.phone) || {}).at || null,
+        horario: horarioMap.get(c.phone) || null,
         ultimaLlamada: ll
           ? {
               fecha: ll.created_at,
@@ -195,6 +197,19 @@ app.patch('/api/clientes/enabled', requirePermission('cobranzas.cliente_toggle')
     res.json(out);
   } catch (err) {
     console.error('[/api/clientes/enabled]', err);
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
+// Horario propio de uno o varios clientes. horario: [{start,end}] o null (sigue el general).
+app.put('/api/clientes/horario', requirePermission('cobranzas.cliente_toggle'), async (req, res) => {
+  try {
+    const { phones, horario } = req.body || {};
+    if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
+    const cfg = await schedule.get(true);
+    const limpio = schedule.validarHorarioCliente(cfg, horario);
+    res.json(await clienteConfig.setHorario(phones, limpio, req.user ? req.user.email : null));
+  } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
@@ -363,7 +378,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
       patch.agentName = b.agentName || null;
     }
     // Ajustes del follow up: solo si vienen.
-    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras']) if (k in b) patch[k] = b[k];
+    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta']) if (k in b) patch[k] = b[k];
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {

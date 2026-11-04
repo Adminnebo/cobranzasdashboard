@@ -30,7 +30,7 @@ export default function QueuePanel({ refreshKey }) {
 
   return (
     <div className={`queue-panel ${q.pendientes ? 'active' : ''}`}>
-      <span className={`queue-dot ${q.pendientes && q.enHorario ? 'live' : ''}`} />
+      <span className={`queue-dot ${q.pendientes && (q.enHorario || q.algunaAbierta) ? 'live' : ''}`} />
       <span className="queue-main">
         {q.pendientes > 0 ? (
           <>
@@ -39,9 +39,12 @@ export default function QueuePanel({ refreshKey }) {
               ? (q.modo === 'concurrencia'
                   ? <> · <strong>{q.activas ?? '?'}/{q.maxConcurrent}</strong> activas</>
                   : <> · 1/min · faltan ~<strong>{eta}</strong></>)
-              : <> · <span className="queue-paused">pausada fuera de horario</span></>}
+              : q.algunaAbierta
+                ? <> · <span className="queue-paused">fuera del horario general: solo clientes con horario propio</span></>
+                : <> · <span className="queue-paused">pausada fuera de horario</span></>}
+            {q.esperandoHorario > 0 && <> · <strong>🕘 {num(q.esperandoHorario)}</strong> esperando su horario</>}
             {q.followUpsEnCola > 0 && <> · <strong>↩ {num(q.followUpsEnCola)}</strong> de follow up</>}
-            {q.proximo && <> · siguiente: {q.proximo.nombre || q.proximo.phone}{q.proximo.agente === 'seguimiento' ? ' (follow up)' : ''}</>}
+            {q.proximo && <> · siguiente: {q.proximo.nombre || q.proximo.phone}{q.proximo.agente === 'seguimiento' ? ' (follow up)' : ''}{q.proximo.horarioPropio ? ' (en su horario)' : ''}</>}
           </>
         ) : (
           <>
@@ -50,7 +53,7 @@ export default function QueuePanel({ refreshKey }) {
           </>
         )}
       </span>
-      <span className="queue-hours">🕘 {q.horario}</span>
+      <span className="queue-hours">🕘 {q.horario}{q.clientesConHorario ? ` · ${q.clientesConHorario} con horario propio` : ''}</span>
       {q.pendientes > 0 && (
         <button className="mini-btn danger" disabled={busy} onClick={cancelar}>
           {busy ? '…' : 'Cancelar cola'}

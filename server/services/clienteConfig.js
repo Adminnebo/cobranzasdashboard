@@ -102,4 +102,35 @@ async function salirEstado(phone, { apagado = false } = {}) {
   }, 'phone');
 }
 
-module.exports = { getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, entrarEstado, salirEstado };
+// ── Horario propio ───────────────────────────────────────────────────────────
+/**
+ * Map<phone, [{start,end}]> de los clientes con horario propio. Si la columna
+ * aún no existe (sql/004 sin correr), devuelve un Map vacío: todos siguen el
+ * horario general.
+ */
+async function getHorarioMap() {
+  let rows;
+  try { rows = await db.select(TABLE, '?select=phone,horario&horario=not.is.null'); }
+  catch (e) { return new Map(); }
+  const map = new Map();
+  for (const r of rows || []) if (Array.isArray(r.horario) && r.horario.length) map.set(String(r.phone), r.horario);
+  return map;
+}
+
+/** Guarda (o borra, con null) el horario propio de uno o varios clientes. */
+async function setHorario(phones, horario, updatedBy) {
+  const list = (Array.isArray(phones) ? phones : [phones]).map(String).filter(Boolean);
+  if (!list.length) return { updated: 0 };
+  const valor = horario && horario.length ? horario : null;
+  const at = new Date().toISOString();
+  // A los que ya tienen fila solo se les toca el horario (no enabled ni el
+  // estado de cobro); los que no tienen fila se crean apagados, como siempre.
+  const existentes = new Set(((await db.select(TABLE, `?select=phone&phone=in.(${list.map(encodeURIComponent).join(',')})`)) || []).map((r) => String(r.phone)));
+  const conFila = list.filter((p) => existentes.has(p)).map((phone) => ({ phone, horario: valor, updated_at: at, updated_by: updatedBy || null }));
+  const sinFila = list.filter((p) => !existentes.has(p)).map((phone) => ({ phone, enabled: false, horario: valor, updated_at: at, updated_by: updatedBy || null }));
+  if (conFila.length) await db.upsert(TABLE, conFila, 'phone');
+  if (sinFila.length) await db.upsert(TABLE, sinFila, 'phone');
+  return { updated: list.length, horario: valor };
+}
+
+module.exports = { getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, entrarEstado, salirEstado };
