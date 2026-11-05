@@ -75,6 +75,8 @@ export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trig
 export const enqueueCalls = (phones) => post('/api/calls/trigger', { phones, origen: 'manual', encolar: true });
 export const fetchQueue = () => get('/api/calls/queue');
 export const cancelQueue = () => del('/api/calls/queue');
+export const fetchQueueLista = () => get('/api/calls/queue/lista');
+export const quitarDeCola = (id) => del(`/api/calls/queue/${encodeURIComponent(id)}`);
 export const resetIvr = (phone) => post(`/api/clientes/${phone}/ivr/reset`, {});
 export const fetchLists = () => get('/api/lists');
 export const createList = (name, phones) => post('/api/lists', { name, phones });

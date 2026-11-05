@@ -394,6 +394,27 @@ app.get('/api/calls/queue', requirePermission('cobranzas.llamadas'), async (req,
   catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 
+// La cola completa, en el orden en que se va a llamar.
+app.get('/api/calls/queue/lista', requirePermission('cobranzas.llamadas'), async (req, res) => {
+  try { res.json(await queue.lista()); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
+// Quitar UNA llamada de la cola. Si era un follow up, su promesa se cierra
+// ("cancelada a mano") para que el motor no la vuelva a encolar.
+app.delete('/api/calls/queue/:id', requirePermission('cobranzas.llamadas'), async (req, res) => {
+  try {
+    const por = req.user ? req.user.email : null;
+    const row = await queue.quitar(req.params.id, por);
+    if (!row) return res.status(404).json({ error: 'Esa llamada ya no está en la cola' });
+    if (row.agente === 'seguimiento') {
+      await promesas.cancelarPorCambioManual([row.phone], por);
+      await clienteConfig.salirEstado(String(row.phone));
+    }
+    res.json({ ok: true, followUp: row.agente === 'seguimiento' });
+  } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
 // Horario de llamadas (bloques) — configurado desde la UI.
 app.get('/api/calls/schedule', requirePermission('cobranzas.horario'), async (req, res) => {
   try { res.json(await schedule.get(true)); }

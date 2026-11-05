@@ -95,3 +95,27 @@ test('guardar horario: no toca enabled ni el estado de cobro; los nuevos quedan 
   assert.equal(fake.tablas.cliente_config.find((r) => r.phone === '8095550001').horario, null);
   assert.equal((await clienteConfig.getHorarioMap()).size, 1);
 });
+
+test('lista de la cola: las que pueden salir primero, en el orden del bot; luego las que esperan', () => {
+  const rows = [fila(1, 'A'), fila(2, 'B', { agente: 'seguimiento' }), fila(3, 'C'), fila(4, 'D')];
+  const horarios = new Map([['C', [{ start: '09:00', end: '10:00' }]], ['D', [{ start: '15:00', end: '16:00' }]]]);
+  const orden = queue.ordenCola(rows, horarios, cfg, hora('09:30'));
+  assert.deepEqual(orden.map((x) => x.r.phone), ['C', 'B', 'A', 'D']);
+  assert.deepEqual(orden.map((x) => x.abierto), [true, true, true, false], 'D espera su horario de la tarde');
+  assert.equal(queue.elegirSiguiente(rows, horarios, cfg, hora('09:30')).phone, orden[0].r.phone);
+});
+
+test('quitar una de la cola: solo la pendiente, queda cancelada con quién la quitó', async () => {
+  fake.reset();
+  fake.tablas.llamada_cola = [
+    { id: 1, phone: 'A', estado: 'pendiente', agente: 'principal', created_at: '2026-11-05T12:00:00Z' },
+    { id: 2, phone: 'B', estado: 'enviada', agente: 'principal', created_at: '2026-11-05T11:00:00Z' },
+  ];
+  const row = await queue.quitar(1, 'yo@nebo');
+  assert.equal(row.phone, 'A');
+  const a = fake.tablas.llamada_cola.find((r) => r.id === 1);
+  assert.equal(a.estado, 'cancelada');
+  assert.match(a.detalle, /quitada a mano \(yo@nebo\)/);
+  assert.equal(await queue.quitar(2, 'yo@nebo'), null, 'una ya enviada no se toca');
+  assert.equal(fake.tablas.llamada_cola.find((r) => r.id === 2).estado, 'enviada');
+});
