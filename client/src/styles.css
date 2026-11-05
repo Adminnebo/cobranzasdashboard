@@ -633,6 +633,9 @@ td.col-accion { width: 1%; }
 .row-menu__item:disabled { opacity: 0.45; cursor: default; }
 .row-menu__sa { margin-left: auto; font-size: 0.66rem; color: var(--text-muted); }
 tr.row-flash { animation: cl-flash 1.8s ease; }
+.cc-item--foco { box-shadow: inset 3px 0 0 var(--warning); }
+.prom-cliente-link { color: var(--series-1); }
+tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 @keyframes cl-flash { 0%, 40% { background: color-mix(in srgb, var(--warning) 24%, transparent); } 100% { background: transparent; } }
 
 /* ══ Necesitan a alguien: pestaña flotante en el borde derecho ══ */

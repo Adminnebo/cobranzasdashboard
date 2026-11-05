@@ -521,7 +521,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         fechaPrometida: r.fecha_prometida, textoOriginal: r.texto_original,
         followUpFecha: r.fecha_prometida ? schedule.fechaFollowUp(r.fecha_prometida, cfg) : null,
         ficha: fichaDe(r),
-        prometidaEl: r.fecha_llamada, montoAlPrometer: r.monto_al_prometer,
+        prometidaEl: r.fecha_llamada, llamadaId: r.llamada_id || null, montoAlPrometer: r.monto_al_prometer,
         agente: r.agente, origen: r.origen,
         proximoIntento: r.proximo_intento_at, seguimientoAt: r.seguimiento_at,
         cerradaAt: r.cerrada_at, motivoCierre: r.motivo_cierre,
