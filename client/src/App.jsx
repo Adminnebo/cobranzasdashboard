@@ -16,6 +16,7 @@ import Login from './components/Login';
 import UsersAdmin from './components/UsersAdmin';
 import CorreoPanel from './components/CorreoPanel';
 import PagosModal from './components/PagosModal';
+import AsistenciaFlotante from './components/AsistenciaFlotante';
 import { useAuth } from './auth/AuthProvider';
 import { getAuthToken } from './auth/token';
 
@@ -49,6 +50,7 @@ export default function App() {
   // URL del botón "Conectar Gmail" (correo-servicio); null = la pestaña Correo no aparece.
   const [correoEmbed, setCorreoEmbed] = useState(null);
   const [pagosOpen, setPagosOpen] = useState(false);
+  const [foco, setFoco] = useState(null); // cliente a mostrar en Clientes (desde el panel flotante)
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
   const llamadasCountRef = useRef(null);
 
@@ -294,8 +296,9 @@ export default function App() {
       )}
 
       {tab === 'clientes' && puede('cobranzas.clientes') && (
-        <ClientesTable clientes={data.clientes} llamadas={data.llamadas} superAdmin={!!data.verPruebas}
-          verPromesas={puede('cobranzas.promesas')} onVerPromesas={() => setTab('promesas')} onChanged={reloadData} />
+        <div className="card" style={{ padding: 0 }}>
+          <ClientesTable clientes={data.clientes} llamadas={data.llamadas} superAdmin={!!data.verPruebas} foco={foco} onChanged={reloadData} />
+        </div>
       )}
 
       {tab === 'llamadas' && puede('cobranzas.clientes') && (
@@ -313,6 +316,12 @@ export default function App() {
       {tab === 'correo' && verCorreo && correoEmbed && <CorreoPanel embed={correoEmbed} />}
 
       {pagosOpen && <PagosModal onClose={() => setPagosOpen(false)} />}
+
+      {/* Quién necesita a una persona: flotante en todas las pestañas, cerrado por defecto. */}
+      {puede('cobranzas.clientes') && (
+        <AsistenciaFlotante clientes={data.clientes} verRetiros={puede('cobranzas.promesas')}
+          onPick={(phone) => { setTab('clientes'); setFoco({ phone, t: Date.now() }); }} />
+      )}
 
     </div>
   );

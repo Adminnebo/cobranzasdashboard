@@ -440,7 +440,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
       patch.agentName = b.agentName || null;
     }
     // Ajustes del follow up: solo si vienen.
-    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'pagoHoyHora', 'followUpMargenDias', 'retiroManana', 'retiroTarde', 'horarioAuto']) if (k in b) patch[k] = b[k];
+    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'followUpMargenDias', 'retiroManana', 'retiroTarde', 'horarioAuto']) if (k in b) patch[k] = b[k];
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {
@@ -528,7 +528,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         anteriorId: r.promesa_anterior_id, createdAt: r.created_at,
       });
     }
-    res.json({ promesas: out, tope: cfg.promesaTope, pagoHoyHora: cfg.pagoHoyHora, followUpMargenDias: cfg.followUpMargenDias, retiroManana: cfg.retiroManana, retiroTarde: cfg.retiroTarde, superAdmin });
+    res.json({ promesas: out, tope: cfg.promesaTope, followUpMargenDias: cfg.followUpMargenDias, retiroManana: cfg.retiroManana, retiroTarde: cfg.retiroTarde, superAdmin });
   } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 

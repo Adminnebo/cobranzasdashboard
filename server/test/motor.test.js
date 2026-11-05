@@ -109,19 +109,20 @@ test('el follow up reemplaza la llamada normal pendiente del mismo cliente', asy
   assert.equal(t('llamada_cola').find((x) => x.agente === 'principal').detalle, 'reemplazada por follow up');
 });
 
-test('promete "hoy": el follow up espera la hora de la tarde (y al día siguiente ya sale)', async () => {
+test('promete "hoy": el follow up sale N días hábiles después (mínimo el siguiente día hábil)', async () => {
   fake.reset();
   fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
   const real = new Map([[TEL, cliente]]);
-  const cfgTarde = { ...cfg, pagoHoyHora: '23:59' }; // la hora de la tarde aún no llega
-  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], real, cfgTarde);
-  const r = await promesas.revisarAbiertas(real, cfgTarde);
-  assert.equal(r.follow_ups_encolados, undefined);
+  const cfg1 = { ...cfg, followUpMargenDias: 1 };
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], real, cfg1);
+  const r = await promesas.revisarAbiertas(real, cfg1);
+  assert.equal(r.follow_ups_encolados, undefined, 'hoy no sale');
   assert.equal(t('llamada_cola').length, 0);
-  // Al día siguiente (la llamada fue "ayer") sí se encola.
-  t('promesa_pago')[0].fecha_llamada = new Date(Date.now() - 86400000).toISOString();
-  t('promesa_pago')[0].fecha_prometida = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  const r2 = await promesas.revisarAbiertas(real, cfgTarde);
+  // Si la fecha fue hace 3 días, el siguiente día hábil ya pasó: sale.
+  const hace3 = new Date(Date.now() - 3 * 86400000).toISOString();
+  t('promesa_pago')[0].fecha_llamada = hace3;
+  t('promesa_pago')[0].fecha_prometida = hace3.slice(0, 10);
+  const r2 = await promesas.revisarAbiertas(real, cfg1);
   assert.equal(r2.follow_ups_encolados, 1);
 });
 

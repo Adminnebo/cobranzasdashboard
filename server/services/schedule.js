@@ -38,7 +38,6 @@ const DEFAULT = {
   horarioClienteDesde: '08:00',
   horarioClienteHasta: '19:00',
   // "Pago hoy": hora a la que sale el follow up de una promesa hecha hoy para hoy.
-  pagoHoyHora: '17:00',
   // Días hábiles después de la fecha prometida para el follow up (deja que el
   // pago se refleje). Con 1: "pago mañana" (jue) -> follow up el vie.
   followUpMargenDias: 1,
@@ -135,8 +134,7 @@ async function get(force = false) {
         reintentoHoras: entero(row.reintento_horas, DEFAULT.reintentoHoras, 1, 8),
         horarioClienteDesde: hhmm(row.horario_cliente_desde, DEFAULT.horarioClienteDesde),
         horarioClienteHasta: hhmm(row.horario_cliente_hasta, DEFAULT.horarioClienteHasta),
-        pagoHoyHora: hhmm(row.pago_hoy_hora, DEFAULT.pagoHoyHora),
-        followUpMargenDias: entero(row.follow_up_margen_dias, DEFAULT.followUpMargenDias, 0, 5),
+        followUpMargenDias: entero(row.follow_up_margen_dias, DEFAULT.followUpMargenDias, 1, 5),
         retiroManana: franja(row.retiro_manana_desde, row.retiro_manana_hasta, DEFAULT.retiroManana),
         retiroTarde: franja(row.retiro_tarde_desde, row.retiro_tarde_hasta, DEFAULT.retiroTarde),
         horarioAuto: row.horario_auto == null ? DEFAULT.horarioAuto : !!row.horario_auto,
@@ -238,10 +236,8 @@ async function set(patch, by) {
         return { horario_cliente_desde: desde, horario_cliente_hasta: hasta };
       })()
     : {};
-  // Igual con la hora de "pago hoy" (sql/005).
-  if ('pagoHoyHora' in patch) rango.pago_hoy_hora = hhmm(next.pagoHoyHora, DEFAULT.pagoHoyHora);
   // Y el margen del follow up (sql/007).
-  if ('followUpMargenDias' in patch) rango.follow_up_margen_dias = entero(next.followUpMargenDias, DEFAULT.followUpMargenDias, 0, 5);
+  if ('followUpMargenDias' in patch) rango.follow_up_margen_dias = entero(next.followUpMargenDias, DEFAULT.followUpMargenDias, 1, 5);
   // Retiros y horario automático (sql/008).
   if ('retiroManana' in patch) {
     const f = franja(next.retiroManana && next.retiroManana.desde, next.retiroManana && next.retiroManana.hasta, DEFAULT.retiroManana);

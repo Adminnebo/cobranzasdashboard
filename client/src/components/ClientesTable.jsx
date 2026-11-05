@@ -1,16 +1,15 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { money, moneyShort, phoneFmt, num } from '../format';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, setClientesHorario, setForzarFollowUp, triggerCalls, enqueueCalls, resetIvr, createList, updateList, fetchPromesasLista } from '../api';
+import { setClientesEnabled, setClientesHorario, setForzarFollowUp, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
 import ListsPanel from './ListsPanel';
 import ClientCalls from './ClientCalls';
-import HorarioCliente, { horarioTexto } from './HorarioCliente';
-import PromesasLateral, { agruparPromesas } from './PromesasLateral';
-import { estadoDe, dia, siguiente, ymdRD, FichaLineas } from './PromesasView';
+import HorarioCliente from './HorarioCliente';
 
 const sortValue = {
   name: (c) => (c.name || '').toLowerCase(),
@@ -49,20 +48,7 @@ const fmtFecha = (iso) => {
 const pctVenc = (c) => (c.deuda_total > 0 ? (c.deuda_vencida / c.deuda_total) * 100 : 0);
 const pctUtil = (c) => (c.credito_ofrecido > 0 ? (c.deuda_total / c.credito_ofrecido) * 100 : 0);
 
-// Filtros rápidos (pastillas sobre la lista). 'nunca' usa la intención, el resto el estado.
-const PILLS = [
-  ['todos', 'Todos'], ['activos', 'Activos'], ['inactivos', 'Inactivos'], ['promesa', '⏳ Con promesa'],
-  ['dice_pago', '💬 Dice que pagó'], ['escalar', '🙋 Pasar a una persona'], ['nunca', 'Nunca llamados'],
-  ['ivr', '🏢 IVR / Buzón'], ['horario', '🕘 Con horario propio'],
-];
-const SORTS = [
-  ['deuda_vencida:desc', 'Vencido (mayor primero)'], ['deuda_vencida:asc', 'Vencido (menor primero)'],
-  ['deuda_total:desc', 'Deuda total'], ['pv:desc', '% vencido'], ['credito_ofrecido:desc', 'Crédito'],
-  ['util:desc', 'Uso del crédito'], ['ultima:desc', 'Última llamada (reciente)'], ['ultima:asc', 'Última llamada (más vieja)'],
-  ['name:asc', 'Nombre (A–Z)'], ['enabled:desc', 'Activos primero'],
-];
-
-export default function ClientesTable({ clientes, llamadas = [], superAdmin = false, verPromesas = false, onVerPromesas, onChanged }) {
+export default function ClientesTable({ clientes, llamadas = [], superAdmin = false, foco = null, onChanged }) {
   // Llamadas agrupadas por teléfono (más recientes primero).
   const callsByPhone = useMemo(() => {
     const map = new Map();
@@ -332,64 +318,16 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
 
   const selArr = [...sel];
 
-  // ── Promesas (panel lateral + bloque "Promesa" del detalle) ──
-  const [prom, setProm] = useState(null);
-  const [promErr, setPromErr] = useState(null);
-  useEffect(() => {
-    if (!verPromesas) return undefined;
-    const load = () => fetchPromesasLista().then((d) => { setProm(d); setPromErr(null); }).catch((e) => setPromErr(e.message));
-    load();
-    const id = setInterval(load, 30000);
-    return () => clearInterval(id);
-  }, [verPromesas, queueKey]);
-  const promPorTel = useMemo(() => {
-    const m = new Map();
-    for (const p of (prom && prom.promesas) || []) {
-      const k = String(p.phone);
-      const abierta = p.estado === 'pendiente' || p.estado === 'en_seguimiento';
-      const ya = m.get(k);
-      if (!ya || (abierta && !(ya.estado === 'pendiente' || ya.estado === 'en_seguimiento'))) m.set(k, p);
-    }
-    return m;
-  }, [prom]);
-
-  // ── Conteos para las pastillas y el resumen (toda la cartera) ──
-  const conteo = useMemo(() => {
-    const c = { todos: 0, activos: 0, inactivos: 0, promesa: 0, dice_pago: 0, escalar: 0, nunca: 0, ivr: 0, horario: 0, vencido: 0 };
-    for (const x of clientes) {
-      c.todos++;
-      if (x.enabled) c.activos++; else c.inactivos++;
-      if (x.estadoCobro && c[x.estadoCobro] !== undefined) c[x.estadoCobro]++;
-      if (!x.ultimaLlamada) c.nunca++;
-      if (x.ivr) c.ivr++;
-      if (x.horario && x.horario.length) c.horario++;
-      if (!x.prueba) c.vencido += x.deuda_vencida || 0;
-    }
-    return c;
-  }, [clientes]);
-  const llamadasHoy = useMemo(() => {
-    const hoy = ymdRD(new Date());
-    const deHoy = llamadas.filter((l) => l.created_at && ymdRD(new Date(l.created_at)) === hoy);
-    return { total: deHoy.length, contestadas: deHoy.filter((l) => l.intencion_pago !== 'no_contesta').length };
-  }, [llamadas]);
-  const promGrupos = useMemo(() => agruparPromesas(prom && prom.promesas), [prom]);
-
-  const pillActiva = f.intencion === 'no_contactado' && f.estado === 'todos' ? 'nunca' : f.estado;
-  const elegirPill = (k) => setF((prev) => ({
-    ...prev,
-    estado: k === 'nunca' ? 'todos' : k,
-    intencion: k === 'nunca' ? 'no_contactado' : (prev.intencion === 'no_contactado' ? '' : prev.intencion),
-  }));
-
-  // ── Ir a un cliente desde el panel de promesas ──
+  // ── Ir a un cliente (desde el panel "Necesitan a alguien") ──
   const [irA, setIrA] = useState(null);
   const [resaltado, setResaltado] = useState(null);
-  const irACliente = (phone) => {
-    const k = String(phone);
+  useEffect(() => {
+    if (!foco || !foco.phone) return;
+    const k = String(foco.phone);
     if (!visibles.some((c) => String(c.phone) === k)) { setF(EMPTY_FILTERS); setQ(''); setActiveList(null); }
     setOpenCall(k);
     setIrA(k);
-  };
+  }, [foco]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!irA) return;
     const idx = visibles.findIndex((c) => String(c.phone) === irA);
@@ -403,261 +341,265 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
       setTimeout(() => setResaltado(null), 1800);
     }
     setIrA(null);
-  }, [irA, visibles, pager.page, pager.pageSize]);
+  }, [irA, visibles, pager.page, pager.pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Menú ⋯ de cada fila ──
-  const [menuDe, setMenuDe] = useState(null);
-  const menuRef = useRef(null);
+  // ── Menú ⋯ de cada fila (flotante, para que la tabla no lo recorte) ──
+  const [menu, setMenu] = useState(null); // { phone, style }
+  const abrirMenu = (e, phone) => {
+    if (menu && menu.phone === phone) { setMenu(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    const right = Math.max(8, window.innerWidth - r.right);
+    const style = r.bottom + 300 > window.innerHeight
+      ? { bottom: window.innerHeight - r.top + 4, right }
+      : { top: r.bottom + 4, right };
+    setMenu({ phone, style });
+  };
   useEffect(() => {
-    if (!menuDe) return undefined;
-    const fuera = (e) => {
-      if (e.target.closest('.row-menu, .row-menu-btn, .horario-pop')) return;
-      setMenuDe(null);
-    };
+    if (!menu) return undefined;
+    const fuera = (e) => { if (!e.target.closest('.row-menu, .row-menu-btn, .horario-pop')) setMenu(null); };
+    const cerrar = (e) => { if (!(e.target && e.target.closest && e.target.closest('.row-menu, .horario-pop'))) setMenu(null); };
+    const esc = (e) => { if (e.key === 'Escape') setMenu(null); };
     document.addEventListener('mousedown', fuera);
-    return () => document.removeEventListener('mousedown', fuera);
-  }, [menuDe]);
-
-  const SortH = ({ k, children, cls }) => (
-    <span className={`cl-h sortable ${k === sortKey ? 'sorted' : ''} ${cls || ''}`} onClick={() => toggleSort(k)}>
-      {children}{k === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-    </span>
+    window.addEventListener('scroll', cerrar, true);
+    window.addEventListener('resize', cerrar);
+    window.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', fuera);
+      window.removeEventListener('scroll', cerrar, true);
+      window.removeEventListener('resize', cerrar);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [menu]);
+  const caret = (k) => (k === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  const Th = ({ k, children, cls }) => (
+    <th className={`${cls || ''} sortable ${k === sortKey ? 'sorted' : ''}`} onClick={() => toggleSort(k)}>
+      {children}<span className="caret">{caret(k)}</span>
+    </th>
   );
 
   return (
-    <div className="cl">
-      <div className="card cl-ops">
-        <div className="cola-header">
-          <QueuePanel refreshKey={queueKey} />
-          <ListsPanel refreshKey={listsKey} onLoad={cargarLista} />
-          <SchedulePanel onSaved={() => setQueueKey((k) => k + 1)} />
-        </div>
+    <div>
+      <div className="cola-header">
+        <QueuePanel refreshKey={queueKey} />
+        <ListsPanel refreshKey={listsKey} onLoad={cargarLista} />
+        <SchedulePanel onSaved={() => setQueueKey((k) => k + 1)} />
       </div>
 
-      <div className="cl-kpis">
-        <div className="card cl-kpi"><b>{num(conteo.todos)}</b><span>clientes · {num(conteo.activos)} activos</span></div>
-        <div className="card cl-kpi"><b className="neg">{moneyShort(conteo.vencido)}</b><span>vencido de la cartera</span></div>
-        <div className="card cl-kpi"><b>{num(llamadasHoy.total)}</b><span>llamadas hoy · {num(llamadasHoy.contestadas)} contestadas</span></div>
-        <div className="card cl-kpi">
-          {verPromesas
-            ? <><b>{num(promGrupos.hoy.length + promGrupos.proximas.length)}</b><span>promesas abiertas · {num(promGrupos.hoy.length)} para hoy</span></>
-            : <><b>{num(conteo.promesa)}</b><span>clientes con promesa</span></>}
-        </div>
+      <div className="toolbar">
+        <input className="search" placeholder="Buscar por cualquier dato: nombre, código, teléfono, email, monto, intención…"
+          value={q} onChange={(e) => setQ(e.target.value)} />
+        <select className="search select" value={f.estado} onChange={(e) => setFilter('estado', e.target.value)}>
+          <option value="todos">Todos los estados</option>
+          <option value="activos">Solo activos</option>
+          <option value="inactivos">Solo inactivos</option>
+          <option value="promesa">⏳ Con promesa (los llama el follow up)</option>
+          <option value="dice_pago">💬 Dice que pagó</option>
+          <option value="escalar">🙋 Pasar a una persona</option>
+          <option value="horario">🕘 Con horario propio</option>
+          <option value="ivr">IVR y Buzón (todos)</option>
+          <option value="ivr_empresa">Solo IVR (empresa)</option>
+          <option value="buzon">Solo Buzón (voicemail)</option>
+          <option value="sin_ivr">Excluir IVR / Buzón</option>
+        </select>
+        <select className="search select" value={f.intencion} onChange={(e) => setFilter('intencion', e.target.value)}>
+          <option value="">Cualquier última llamada</option>
+          <option value="no_contactado">Nunca llamados</option>
+          {Object.entries(INTENCION).filter(([k]) => k !== 'no_contactado').map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
+        <button className={`mini-btn ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters((s) => !s)}>
+          ⚙ Filtros {filtrosActivos ? '•' : ''}
+        </button>
       </div>
 
-      <div className={`cl-body ${verPromesas ? '' : 'cl-body--solo'}`}>
-        <div className="card cl-list">
-          <div className="toolbar cl-toolbar">
-            <input className="search" placeholder="Buscar por cualquier dato: nombre, código, teléfono, email, monto, intención…"
-              value={q} onChange={(e) => setQ(e.target.value)} />
-            <select className="search select" value={`${sortKey}:${sortDir}`} title="Ordenar"
-              onChange={(e) => { const [k, d] = e.target.value.split(':'); setSortKey(k); setSortDir(d); }}>
-              {!SORTS.some(([v]) => v === `${sortKey}:${sortDir}`) && <option value={`${sortKey}:${sortDir}`}>Orden actual</option>}
-              {SORTS.map(([v, l]) => <option key={v} value={v}>Ordenar: {l}</option>)}
-            </select>
-            <button className={`mini-btn ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters((s) => !s)}>
-              ⚙ Filtros {filtrosActivos ? '•' : ''}
+      {showFilters && (
+        <div className="filters">
+          <div className="filter-presets">
+            <span className="filter-lbl">Deuda:</span>
+            <button className="chip sm" onClick={() => applyPreset({ vencidoMin: '100000', soloLlamables: true }, { key: 'deuda_vencida', dir: 'desc' })}>Vencido &gt; $100k</button>
+            <button className="chip sm" onClick={() => applyPreset({ vencidoMin: '500000', soloLlamables: true }, { key: 'deuda_vencida', dir: 'desc' })}>Vencido &gt; $500k</button>
+            <button className="chip sm" onClick={() => applyPreset({ pvMin: '75', soloLlamables: true })}>+75% vencido</button>
+            <button className="chip sm" onClick={() => applyPreset({ utilMin: '100', soloLlamables: true })}>Sobre su límite</button>
+            <button className="chip sm" onClick={() => applyPreset({ vencidoMin: '1', soloLlamables: true })}>Con vencido</button>
+          </div>
+          <div className="filter-presets">
+            <span className="filter-lbl">Llamadas:</span>
+            <button className="chip sm" onClick={() => applyPreset({ nLlamadasMin: '1', soloLlamables: true }, { key: 'ultima', dir: 'desc' })}>🕐 Últimos llamados</button>
+            <button className="chip sm" onClick={() => applyPreset({ ultimaDesde: hoyYMD(), soloLlamables: true }, { key: 'ultima', dir: 'desc' })}>Llamados hoy</button>
+            <button className="chip sm" onClick={() => applyPreset({ intencion: 'no_contactado', soloLlamables: true })}>Nunca llamados</button>
+            <button className="chip sm" onClick={() => applyPreset({ diasSinContacto: '7', soloLlamables: true }, { key: 'ultima', dir: 'asc' })}>Sin contacto 7d+</button>
+            <button className="chip sm" onClick={() => applyPreset({ conPromesa: true, soloLlamables: true }, { key: 'ultima', dir: 'desc' })}>Con promesa</button>
+            <button className="chip sm" onClick={() => applyPreset({ estado: 'ivr_empresa' })}>🏢 IVR</button>
+            <button className="chip sm" onClick={() => applyPreset({ estado: 'buzon' })}>📮 Buzón</button>
+            <button className="chip sm danger" onClick={() => { setF(EMPTY_FILTERS); setQ(''); }}>✕ Limpiar</button>
+          </div>
+
+          <div className="filter-grid">
+            <label className="filter-field">
+              <span>Deuda vencida (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.vencidoMin} onChange={(e) => setFilter('vencidoMin', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Deuda vencida (máx.)</span>
+              <input type="number" className="search" placeholder="∞" value={f.vencidoMax} onChange={(e) => setFilter('vencidoMax', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Deuda total (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.totalMin} onChange={(e) => setFilter('totalMin', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Deuda total (máx.)</span>
+              <input type="number" className="search" placeholder="∞" value={f.totalMax} onChange={(e) => setFilter('totalMax', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>% vencido (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.pvMin} onChange={(e) => setFilter('pvMin', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>% utilización crédito (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.utilMin} onChange={(e) => setFilter('utilMin', e.target.value)} />
+            </label>
+            <label className="filter-field check">
+              <input type="checkbox" checked={f.soloLlamables} onChange={(e) => setFilter('soloLlamables', e.target.checked)} />
+              <span>Solo con teléfono (llamables)</span>
+            </label>
+          </div>
+
+          <div className="filter-sub">Llamadas</div>
+          <div className="filter-grid">
+            <label className="filter-field">
+              <span>Nº de llamadas (mín.)</span>
+              <input type="number" className="search" placeholder="0" value={f.nLlamadasMin} onChange={(e) => setFilter('nLlamadasMin', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Días sin contacto (mín.)</span>
+              <input type="number" className="search" placeholder="ej. 7" value={f.diasSinContacto} onChange={(e) => setFilter('diasSinContacto', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Última llamada desde</span>
+              <input type="date" className="search" value={f.ultimaDesde} onChange={(e) => setFilter('ultimaDesde', e.target.value)} />
+            </label>
+            <label className="filter-field">
+              <span>Última llamada hasta</span>
+              <input type="date" className="search" value={f.ultimaHasta} onChange={(e) => setFilter('ultimaHasta', e.target.value)} />
+            </label>
+            <label className="filter-field check">
+              <input type="checkbox" checked={f.conPromesa} onChange={(e) => setFilter('conPromesa', e.target.checked)} />
+              <span>Con promesa de pago</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Resumen del grupo filtrado + acciones sobre TODO el grupo */}
+      {filtrosActivos && (
+        <div className="group-bar">
+          <span className="group-count">
+            <strong>{num(filtered.length)}</strong> coinciden · <strong>{num(llamablesFiltrados.length)}</strong> llamables
+            {ivrEnGrupo > 0 && <> · <span style={{ color: 'var(--warning)' }}>{num(ivrEnGrupo)} IVR/Buzón excluidos</span></>}
+            {' · '}vencido del grupo: <strong>{money(filtered.reduce((s, c) => s + (c.deuda_vencida || 0), 0))}</strong>
+          </span>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length} onClick={selectAllFiltered}>
+            Seleccionar los {num(llamablesFiltrados.length)} llamables
+          </button>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
+            onClick={() => setEnabled(llamablesFiltrados.map((c) => c.phone), true)}>
+            Activar el grupo
+          </button>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
+            onClick={() => setEnabled(llamablesFiltrados.map((c) => c.phone), false)}>
+            Desactivar el grupo
+          </button>
+          <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
+            onClick={() => guardarLista(llamablesFiltrados.map((c) => c.phone))}>
+            💾 Guardar como lista
+          </button>
+        </div>
+      )}
+
+      {/* Barra de edición de la lista activa */}
+      {activeList && (
+        <div className="listedit-bar">
+          <span className="listedit-name">📋 Lista: <strong>{activeList.name}</strong> · {num(activeList.phones.size)} contacto(s){listVerTodos ? ' · viendo todos para agregar' : ''}</span>
+          <button className={`mini-btn ${listVerTodos ? 'active' : ''}`} onClick={() => setListVerTodos((v) => !v)}>
+            {listVerTodos ? '↩ Ver solo la lista' : '➕ Ver todos para agregar'}
+          </button>
+          {selArr.length > 0 && (
+            <button className="mini-btn" disabled={busy} onClick={() => agregarALista(selArr)}>
+              Agregar {num(selArr.length)} seleccionados
             </button>
-          </div>
-
-          <div className="cl-pills">
-            {PILLS.filter(([k]) => k === 'todos' || conteo[k] > 0 || pillActiva === k).map(([k, l]) => (
-              <button key={k} className={`cl-pill ${pillActiva === k ? 'on' : ''}`} onClick={() => elegirPill(k)}>
-                {l}<b>{num(conteo[k])}</b>
-              </button>
-            ))}
-          </div>
-
-          {showFilters && (
-            <div className="filters">
-              <div className="filter-presets">
-                <span className="filter-lbl">Deuda:</span>
-                <button className="chip sm" onClick={() => applyPreset({ vencidoMin: '100000', soloLlamables: true }, { key: 'deuda_vencida', dir: 'desc' })}>Vencido &gt; $100k</button>
-                <button className="chip sm" onClick={() => applyPreset({ vencidoMin: '500000', soloLlamables: true }, { key: 'deuda_vencida', dir: 'desc' })}>Vencido &gt; $500k</button>
-                <button className="chip sm" onClick={() => applyPreset({ pvMin: '75', soloLlamables: true })}>+75% vencido</button>
-                <button className="chip sm" onClick={() => applyPreset({ utilMin: '100', soloLlamables: true })}>Sobre su límite</button>
-                <button className="chip sm" onClick={() => applyPreset({ vencidoMin: '1', soloLlamables: true })}>Con vencido</button>
-              </div>
-              <div className="filter-presets">
-                <span className="filter-lbl">Llamadas:</span>
-                <button className="chip sm" onClick={() => applyPreset({ nLlamadasMin: '1', soloLlamables: true }, { key: 'ultima', dir: 'desc' })}>🕐 Últimos llamados</button>
-                <button className="chip sm" onClick={() => applyPreset({ ultimaDesde: hoyYMD(), soloLlamables: true }, { key: 'ultima', dir: 'desc' })}>Llamados hoy</button>
-                <button className="chip sm" onClick={() => applyPreset({ intencion: 'no_contactado', soloLlamables: true })}>Nunca llamados</button>
-                <button className="chip sm" onClick={() => applyPreset({ diasSinContacto: '7', soloLlamables: true }, { key: 'ultima', dir: 'asc' })}>Sin contacto 7d+</button>
-                <button className="chip sm" onClick={() => applyPreset({ conPromesa: true, soloLlamables: true }, { key: 'ultima', dir: 'desc' })}>Con promesa</button>
-                <button className="chip sm" onClick={() => applyPreset({ estado: 'ivr_empresa' })}>🏢 IVR</button>
-                <button className="chip sm" onClick={() => applyPreset({ estado: 'buzon' })}>📮 Buzón</button>
-                <button className="chip sm danger" onClick={() => { setF(EMPTY_FILTERS); setQ(''); }}>✕ Limpiar</button>
-              </div>
-
-              <div className="filter-grid">
-                <label className="filter-field">
-                  <span>Estado</span>
-                  <select className="search select" value={f.estado} onChange={(e) => setFilter('estado', e.target.value)}>
-                    <option value="todos">Todos los estados</option>
-                    <option value="activos">Solo activos</option>
-                    <option value="inactivos">Solo inactivos</option>
-                    <option value="promesa">⏳ Con promesa (los llama el follow up)</option>
-                    <option value="dice_pago">💬 Dice que pagó</option>
-                    <option value="escalar">🙋 Pasar a una persona</option>
-                    <option value="horario">🕘 Con horario propio</option>
-                    <option value="ivr">IVR y Buzón (todos)</option>
-                    <option value="ivr_empresa">Solo IVR (empresa)</option>
-                    <option value="buzon">Solo Buzón (voicemail)</option>
-                    <option value="sin_ivr">Excluir IVR / Buzón</option>
-                  </select>
-                </label>
-                <label className="filter-field">
-                  <span>Última llamada</span>
-                  <select className="search select" value={f.intencion} onChange={(e) => setFilter('intencion', e.target.value)}>
-                    <option value="">Cualquier última llamada</option>
-                    <option value="no_contactado">Nunca llamados</option>
-                    {Object.entries(INTENCION).filter(([k]) => k !== 'no_contactado').map(([k, v]) => (
-                      <option key={k} value={k}>{v.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="filter-sub">Deuda</div>
-              <div className="filter-grid">
-                <label className="filter-field">
-                  <span>Vencido mín.</span>
-                  <input type="number" className="search" placeholder="0" value={f.vencidoMin} onChange={(e) => setFilter('vencidoMin', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>Vencido máx.</span>
-                  <input type="number" className="search" placeholder="∞" value={f.vencidoMax} onChange={(e) => setFilter('vencidoMax', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>Deuda total mín.</span>
-                  <input type="number" className="search" placeholder="0" value={f.totalMin} onChange={(e) => setFilter('totalMin', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>Deuda total máx.</span>
-                  <input type="number" className="search" placeholder="∞" value={f.totalMax} onChange={(e) => setFilter('totalMax', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>% vencido (mín.)</span>
-                  <input type="number" className="search" placeholder="0" value={f.pvMin} onChange={(e) => setFilter('pvMin', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>% utilización crédito (mín.)</span>
-                  <input type="number" className="search" placeholder="0" value={f.utilMin} onChange={(e) => setFilter('utilMin', e.target.value)} />
-                </label>
-                <label className="filter-field check">
-                  <input type="checkbox" checked={f.soloLlamables} onChange={(e) => setFilter('soloLlamables', e.target.checked)} />
-                  <span>Solo con teléfono (llamables)</span>
-                </label>
-              </div>
-
-              <div className="filter-sub">Llamadas</div>
-              <div className="filter-grid">
-                <label className="filter-field">
-                  <span>Nº de llamadas (mín.)</span>
-                  <input type="number" className="search" placeholder="0" value={f.nLlamadasMin} onChange={(e) => setFilter('nLlamadasMin', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>Días sin contacto (mín.)</span>
-                  <input type="number" className="search" placeholder="ej. 7" value={f.diasSinContacto} onChange={(e) => setFilter('diasSinContacto', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>Última llamada desde</span>
-                  <input type="date" className="search" value={f.ultimaDesde} onChange={(e) => setFilter('ultimaDesde', e.target.value)} />
-                </label>
-                <label className="filter-field">
-                  <span>Última llamada hasta</span>
-                  <input type="date" className="search" value={f.ultimaHasta} onChange={(e) => setFilter('ultimaHasta', e.target.value)} />
-                </label>
-                <label className="filter-field check">
-                  <input type="checkbox" checked={f.conPromesa} onChange={(e) => setFilter('conPromesa', e.target.checked)} />
-                  <span>Con promesa de pago</span>
-                </label>
-              </div>
-            </div>
           )}
+          <button className="btn call-btn" disabled={busy || !activeList.phones.size} onClick={() => llamar([...activeList.phones])}>
+            📞 Llamar a la lista ({num(activeList.phones.size)})
+          </button>
+          <button className="mini-btn" disabled={busy || !activeList.phones.size} onClick={() => setEnabled([...activeList.phones], true)}>Activar lista</button>
+          <button className="mini-btn" onClick={() => { setActiveList(null); setListVerTodos(false); setMsg(null); }}>Cerrar</button>
+        </div>
+      )}
 
-          {/* Resumen del grupo filtrado + acciones sobre TODO el grupo */}
-          {filtrosActivos && (
-            <div className="group-bar">
-              <span className="group-count">
-                <strong>{num(filtered.length)}</strong> coinciden · <strong>{num(llamablesFiltrados.length)}</strong> llamables
-                {ivrEnGrupo > 0 && <> · <span style={{ color: 'var(--warning)' }}>{num(ivrEnGrupo)} IVR/Buzón excluidos</span></>}
-                {' · '}vencido del grupo: <strong>{money(filtered.reduce((s, c) => s + (c.deuda_vencida || 0), 0))}</strong>
-              </span>
-              <button className="mini-btn" disabled={busy || !llamablesFiltrados.length} onClick={selectAllFiltered}>
-                Seleccionar los {num(llamablesFiltrados.length)} llamables
-              </button>
-              <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
-                onClick={() => setEnabled(llamablesFiltrados.map((c) => c.phone), true)}>
-                Activar el grupo
-              </button>
-              <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
-                onClick={() => setEnabled(llamablesFiltrados.map((c) => c.phone), false)}>
-                Desactivar el grupo
-              </button>
-              <button className="mini-btn" disabled={busy || !llamablesFiltrados.length}
-                onClick={() => guardarLista(llamablesFiltrados.map((c) => c.phone))}>
-                💾 Guardar como lista
-              </button>
-            </div>
-          )}
-
-          {/* Barra de edición de la lista activa */}
+      {/* Barra de acciones sobre la selección */}
+      {selArr.length > 0 && (
+        <div className="bulkbar">
+          <span className="bulk-count">{num(selArr.length)} seleccionado(s)</span>
           {activeList && (
-            <div className="listedit-bar">
-              <span className="listedit-name">📋 Lista: <strong>{activeList.name}</strong> · {num(activeList.phones.size)} contacto(s){listVerTodos ? ' · viendo todos para agregar' : ''}</span>
-              <button className={`mini-btn ${listVerTodos ? 'active' : ''}`} onClick={() => setListVerTodos((v) => !v)}>
-                {listVerTodos ? '↩ Ver solo la lista' : '➕ Ver todos para agregar'}
-              </button>
-              <button className="btn call-btn" disabled={busy || !activeList.phones.size} onClick={() => llamar([...activeList.phones])}>
-                📞 Llamar a la lista ({num(activeList.phones.size)})
-              </button>
-              <button className="mini-btn" disabled={busy || !activeList.phones.size} onClick={() => setEnabled([...activeList.phones], true)}>Activar lista</button>
-              <button className="mini-btn" onClick={() => { setActiveList(null); setListVerTodos(false); setMsg(null); }}>Cerrar</button>
-            </div>
+            <button className="mini-btn" disabled={busy} onClick={() => agregarALista(selArr)}>➕ A la lista</button>
           )}
+          <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, true)}>Activar</button>
+          <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, false)}>Desactivar</button>
+          <HorarioCliente variant="bulk" count={selArr.length} disabled={busy} onSave={(h) => guardarHorario(selArr, h)} />
+          <button className="btn call-btn" disabled={busy} onClick={() => llamar(selArr)}>
+            {busy ? 'Lanzando…' : `📞 Llamar a ${num(selArr.length)}`}
+          </button>
+          <button className="mini-btn" disabled={busy} onClick={() => guardarLista(selArr)}>💾 Guardar como lista</button>
+          <button className="mini-btn" onClick={() => setSel(new Set())}>Limpiar selección</button>
+        </div>
+      )}
 
-          {msg && <div className={`bulk-msg ${msg.type}`}>{msg.text}</div>}
+      {msg && <div className={`bulk-msg ${msg.type}`}>{msg.text}</div>}
 
-          <Pager p={pager} />
-
-          <div className="cl-cols">
-            <span><input type="checkbox" checked={pageSelected} onChange={toggleAllPage} title="Seleccionar página" /></span>
-            <SortH k="enabled">Llamar</SortH>
-            <SortH k="name">Cliente</SortH>
-            <SortH k="deuda_vencida">Vencido</SortH>
-            <SortH k="deuda_total" cls="cl-wide">Deuda total · crédito</SortH>
-            <SortH k="ultima">Última llamada</SortH>
-            <span className="cl-h" style={{ textAlign: 'right' }}>Acción</span>
-          </div>
-
-          {slice.map((c, i) => {
-            const pv = Math.round(pctVenc(c));
-            const util = Math.round(pctUtil(c));
-            const abierta = openCall === c.phone;
-            const clientCalls = callsByPhone.get(c.phone) || [];
-            const nCalls = clientCalls.length;
-            const nFu = clientCalls.filter((l) => l.agente === 'seguimiento').length;
-            const rowKey = (c.codigo || c.id || i) + '-' + i;
-            const p = c.phone ? promPorTel.get(String(c.phone)) : null;
-            const pAbierta = p && (p.estado === 'pendiente' || p.estado === 'en_seguimiento');
-            const barCls = pv > 75 ? '' : pv > 25 ? 'mid' : 'low';
-            return (
-              <Fragment key={rowKey}>
-                <div
-                  id={c.phone ? `cl-${c.phone}` : undefined}
-                  className={`cl-row ${sel.has(c.phone) ? 'sel' : ''} ${abierta ? 'open' : ''} ${enLista(c) ? 'inlist' : ''} ${resaltado && resaltado === String(c.phone) ? 'flash' : ''}`}
+      <Pager p={pager} />
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style={{ width: 30 }}>
+                <input type="checkbox" checked={pageSelected} onChange={toggleAllPage} title="Seleccionar página" />
+              </th>
+              <Th k="enabled">Llamar</Th>
+              <th>#</th>
+              <Th k="name">Cliente</Th>
+              <th>Teléfono</th>
+              <Th k="credito_ofrecido" cls="num">Crédito</Th>
+              <Th k="deuda_total" cls="num">Deuda total</Th>
+              <Th k="deuda_vencida" cls="num">Vencida</Th>
+              <Th k="pv" cls="num">% venc.</Th>
+              <Th k="ultima">Última llamada</Th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {slice.map((c, i) => {
+              const pv = Math.round(pctVenc(c));
+              const abierta = openCall === String(c.phone) && c.ultimaLlamada;
+              const clientCalls = callsByPhone.get(c.phone) || [];
+              const nCalls = clientCalls.length;
+              const nFu = clientCalls.filter((l) => l.agente === 'seguimiento').length;
+              const rowKey = (c.codigo || c.id || i) + '-' + i;
+              return (
+                <Fragment key={rowKey}>
+                <tr id={c.phone ? `cl-${c.phone}` : undefined}
+                  className={`${sel.has(c.phone) ? 'row-sel' : ''} ${c.ultimaLlamada ? 'row-clickable' : ''} ${abierta ? 'row-open' : ''} ${enLista(c) ? 'row-inlist' : ''} ${resaltado && resaltado === String(c.phone) ? 'row-flash' : ''}`}
                   onClick={(e) => {
                     // No desplegar si el click fue en un control (checkbox, switch, botón, link).
                     if (e.target.closest('button, input, a, label, .row-menu')) return;
-                    setOpenCall(abierta ? null : c.phone);
+                    if (c.ultimaLlamada) setOpenCall(abierta ? null : String(c.phone));
                   }}
                 >
-                  <span>
+                  <td>
                     <input type="checkbox" disabled={!selectable(c)} checked={sel.has(c.phone)} onChange={() => toggleOne(c.phone)} />
-                  </span>
-                  <div className="cl-who">
+                  </td>
+                  <td>
                     {c.ivr ? (
                       <span className={`ivr-badge ${c.ivrTipo === 'buzon' ? 'ivr-badge--buzon' : 'ivr-badge--ivr'}`}
                         title={c.ivrTipo === 'buzon'
@@ -679,15 +621,14 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                     ) : (
                       <span className="no-phone" title="Sin teléfono: su deuda cuenta, pero no se puede llamar">—</span>
                     )}
-                  </div>
-                  <div className="cl-client">
-                    <div className="cl-name">
+                  </td>
+                  <td style={{ color: 'var(--text-muted)' }}>{start + i + 1}</td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>
                       {c.name}
                       {c.prueba && <span className="tag-prueba" title="Número de prueba: cliente ficticio, solo lo ven los super admins y no cuenta en nada">Prueba</span>}
                     </div>
-                    <div className="cl-meta">
-                      {c.phone ? phoneFmt(c.phone) : 'sin teléfono'}{c.codigo ? ` · ${c.codigo}` : ''}{c.empresa && c.empresa !== c.name ? ` · ${c.empresa}` : ''}
-                    </div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{c.empresa}</div>
                     <div className="cliente-tags">
                       <EstadoCobro c={c} />
                       {c.forzarFollowUp && (
@@ -700,150 +641,103 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                         <HorarioCliente variant="chip" horario={c.horario} origen={c.horarioOrigen} detalle={c.horarioDetalle} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
                       )}
                     </div>
-                  </div>
-                  <div className="cl-debt">
-                    <b className={c.deuda_vencida > 0 ? '' : 'zero'}>{money(c.deuda_vencida)}</b>
-                    <div className="cl-bar"><i className={barCls} style={{ width: `${Math.min(100, pv)}%` }} /></div>
-                    <div className="cl-meta">
-                      {pv}% vencido<span className="cl-narrow"> de {money(c.deuda_total)} · crédito {money(c.credito_ofrecido)}</span>
-                    </div>
-                  </div>
-                  <div className="cl-total cl-wide">
-                    <b>{money(c.deuda_total)}</b>
-                    <div className="cl-meta" style={{ color: util > 100 ? 'var(--critical)' : undefined }}>
-                      crédito {money(c.credito_ofrecido)}{c.credito_ofrecido > 0 ? ` · uso ${util}%` : ''}
-                    </div>
-                  </div>
-                  <div className="cl-ult">
+                  </td>
+                  <td style={{ fontVariantNumeric: 'tabular-nums', color: c.phone ? undefined : 'var(--text-muted)' }}>
+                    {c.phone ? phoneFmt(c.phone) : 'sin teléfono'}
+                  </td>
+                  <td className="num">{money(c.credito_ofrecido)}</td>
+                  <td className="num">{money(c.deuda_total)}</td>
+                  <td className="num" style={{ color: c.deuda_vencida > 0 ? 'var(--critical)' : 'var(--text-muted)' }}>
+                    {money(c.deuda_vencida)}
+                  </td>
+                  <td className="num" style={{ color: pv > 75 ? 'var(--critical)' : pv > 25 ? 'var(--serious)' : 'var(--text-secondary)' }}>{pv}%</td>
+                  <td>
                     {c.ultimaLlamada ? (
-                      <>
+                      <button
+                        className={`ult-llamada as-btn ${abierta ? 'open' : ''}`}
+                        title="Ver las llamadas de este cliente"
+                        onClick={() => setOpenCall(abierta ? null : String(c.phone))}
+                      >
                         <span className="pill" style={{ color: intencionColor(c.ultimaLlamada.intencion) }}>
                           <span className="pdot" style={{ background: intencionColor(c.ultimaLlamada.intencion) }} />
                           {intencionLabel(c.ultimaLlamada.intencion)}
                         </span>
-                        <div className="cl-meta">
+                        <span className="ult-meta">
                           {abierta ? '▾ ' : '▸ '}{fmtFecha(c.ultimaLlamada.fecha)}
                           {' · '}<strong title={`${nCalls - nFu} del agente de cobranzas · ${nFu} del follow up`}>📞 {nCalls - nFu}{nFu ? <> · ↩ {nFu}</> : null}</strong>
-                        </div>
-                        {c.ultimaLlamada.notas && <div className="cl-ult-notas cl-wide">{c.ultimaLlamada.notas}</div>}
-                      </>
-                    ) : (
-                      <span className="cl-meta">Nunca llamado</span>
-                    )}
-                  </div>
-                  <div className="cl-act">
-                    {c.ivr ? (
-                      <button className="mini-btn" disabled={busy}
-                        title="Quita la marca de IVR y permite volver a llamarlo (útil si consiguieron otro número)"
-                        onClick={() => run(() => resetIvr(c.phone), 'Marca de IVR quitada. Ya se puede volver a llamar.')}>
-                        ↺ Reactivar
+                        </span>
                       </button>
                     ) : (
-                      <button className="btn cl-call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>📞 Llamar</button>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Nunca llamado</span>
                     )}
-                    {activeList && c.phone && (
-                      enLista(c) ? (
-                        <button className="mini-btn danger" disabled={busy} title="Quitar de la lista" onClick={() => quitarDeLista(c.phone)}>✕ lista</button>
+                  </td>
+                  <td className="col-accion">
+                    <div className="acc-cell">
+                      {c.ivr ? (
+                        <button className="mini-btn" disabled={busy}
+                          title="Quita la marca de IVR y permite volver a llamarlo (útil si consiguieron otro número)"
+                          onClick={() => run(() => resetIvr(c.phone), 'Marca de IVR quitada. Ya se puede volver a llamar.')}>
+                          ↺ Reactivar
+                        </button>
                       ) : (
-                        <button className="mini-btn" disabled={busy || c.ivr} title="Agregar a la lista" onClick={() => agregarALista([c.phone])}>➕ lista</button>
-                      )
-                    )}
-                    {c.phone && (
-                      <button className="mini-btn row-menu-btn" title="Más acciones" onClick={() => setMenuDe(menuDe === c.phone ? null : c.phone)}>⋯</button>
-                    )}
-                    {menuDe === c.phone && (
-                      <div className="row-menu" ref={menuRef}>
+                        <button className="mini-btn call" disabled={busy || !c.phone} onClick={() => llamar([c.phone])}>
+                          📞 Llamar
+                        </button>
+                      )}
+                      {c.phone && (
+                        <button className={`mini-btn row-menu-btn ${menu && menu.phone === c.phone ? 'active' : ''}`} title="Más acciones"
+                          onClick={(e) => abrirMenu(e, c.phone)}>⋯</button>
+                      )}
+                    </div>
+                    {menu && menu.phone === c.phone && createPortal(
+                      <div className="row-menu row-menu--fixed" style={menu.style}>
                         <HorarioCliente variant="menu" horario={c.horario} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
                         {!c.ivr && (
                           <button className="row-menu__item" disabled={busy}
-                            onClick={() => { setMenuDe(null); run(() => enqueueCalls([c.phone]), (r) => (r.encoladas ? 'En la cola: sale cuando le toque según el horario.' : 'Ya estaba en la cola.')); }}
+                            onClick={() => { setMenu(null); run(() => enqueueCalls([c.phone]), (r) => (r.encoladas ? 'En la cola: sale cuando le toque según el horario.' : 'Ya estaba en la cola.')); }}
                             title="Lo pone en la cola sin llamar al instante: espera turno y respeta el horario (el general o el suyo)">
                             ➕ Poner en la cola
                           </button>
                         )}
-                        <button className="row-menu__item" onClick={() => { setMenuDe(null); setOpenCall(abierta ? null : c.phone); }}>
-                          {abierta ? '▴ Cerrar detalle' : '▾ Ver detalle y llamadas'}
-                        </button>
+                        {activeList && (enLista(c) ? (
+                          <button className="row-menu__item" disabled={busy} onClick={() => { setMenu(null); quitarDeLista(c.phone); }}>✕ Quitar de la lista</button>
+                        ) : (
+                          <button className="row-menu__item" disabled={busy || c.ivr} onClick={() => { setMenu(null); agregarALista([c.phone]); }}>➕ Agregar a la lista</button>
+                        ))}
+                        {c.ultimaLlamada && (
+                          <button className="row-menu__item" onClick={() => { setMenu(null); setOpenCall(abierta ? null : String(c.phone)); }}>
+                            {abierta ? '▴ Cerrar llamadas' : '▾ Ver llamadas'}
+                          </button>
+                        )}
                         {superAdmin && !c.prueba && (
                           <>
                             <hr />
-                            <button className="row-menu__item" disabled={busy} onClick={() => { setMenuDe(null); forzar(c, !c.forzarFollowUp); }}
+                            <button className="row-menu__item" disabled={busy} onClick={() => { setMenu(null); forzar(c, !c.forzarFollowUp); }}
                               title="Pruebas: que el follow up lo llame aunque no tenga vencido o tenga IVR">
                               🧪 {c.forzarFollowUp ? 'Quitar follow up forzado' : 'Forzar follow up'} <span className="row-menu__sa">super admin</span>
                             </button>
                           </>
                         )}
-                      </div>
+                      </div>,
+                      document.body,
                     )}
-                  </div>
-                </div>
-
+                  </td>
+                </tr>
                 {abierta && (
-                  <div className="cl-detail">
-                    <div>
-                      <h4>Datos</h4>
-                      <div className="cl-kv">
-                        <span>Código</span><span>{c.codigo || '—'}</span>
-                        <span>Teléfono</span><span>{c.phone ? phoneFmt(c.phone) : 'sin teléfono'}</span>
-                        {c.email && <><span>Email</span><span>{c.email}</span></>}
-                        <span>Deuda total</span><span>{money(c.deuda_total)}</span>
-                        <span>Vencido</span><span>{money(c.deuda_vencida)} ({pv}%)</span>
-                        <span>Crédito</span><span>{money(c.credito_ofrecido)}{c.credito_ofrecido > 0 ? ` · uso ${util}%` : ''}</span>
-                        <span>Horario</span><span>{c.horario && c.horario.length ? `${c.horarioOrigen === 'ia' ? '🤖 ' : ''}${horarioTexto(c.horario)}${c.horarioOrigen === 'ia' && c.horarioDetalle ? ` (${c.horarioDetalle})` : ''}` : 'el general'}</span>
-                        {c.ivr && <><span>IVR</span><span>{c.ivrDetalle || (c.ivrTipo === 'buzon' ? 'Buzón' : 'IVR de empresa')}</span></>}
-                      </div>
-                    </div>
-                    <div className="cl-detail__calls">
+                  <tr className="call-detail-row">
+                    <td colSpan={11}>
                       <ClientCalls calls={clientCalls} />
-                    </div>
-                    <div>
-                      <h4>Promesa</h4>
-                      {!verPromesas ? (
-                        <div className="cl-meta">{c.estadoCobro === 'promesa' ? `Prometió para el ${dia(c.estadoDetalle)}.` : 'Sin promesa abierta.'}</div>
-                      ) : p ? (
-                        <>
-                          <div className="cl-kv">
-                            <span>Estado</span><span style={{ color: estadoDe(p.estado).color, fontWeight: 600 }}>{estadoDe(p.estado).label}</span>
-                            <span>Fecha</span><span>{dia(p.fechaPrometida)}{p.textoOriginal ? ` · "${p.textoOriginal}"` : ''}</span>
-                            <span>Promesa</span><span>{p.intento || 1}.ª{prom && p.intento >= prom.tope ? ' (última)' : ''}</span>
-                            <span>{pAbierta ? 'Qué sigue' : 'Cierre'}</span><span>{siguiente(p, prom && prom.pagoHoyHora) || '—'}</span>
-                          </div>
-                          <FichaLineas ficha={p.ficha} fechaPrometida={p.fechaPrometida} />
-                          {!pAbierta && <div className="cl-meta" style={{ marginTop: 6 }}>Última promesa, ya cerrada. No tiene una abierta.</div>}
-                          {onVerPromesas && <div style={{ marginTop: 10 }}><button className="mini-btn" onClick={onVerPromesas}>Ver en Promesas</button></div>}
-                        </>
-                      ) : (
-                        <div className="cl-meta">Sin promesas registradas.</div>
-                      )}
-                    </div>
-                  </div>
+                    </td>
+                  </tr>
                 )}
-              </Fragment>
-            );
-          })}
-          {slice.length === 0 && (
-            <div className="cl-empty">Ningún cliente coincide con los filtros.</div>
-          )}
-          <Pager p={pager} />
-        </div>
-
-        {verPromesas && <PromesasLateral data={prom} error={promErr} onPick={irACliente} onVerTodas={onVerPromesas} />}
-      </div>
-
-      {/* Barra de acciones sobre la selección: fija abajo */}
-      <div className={`cl-bulk ${selArr.length ? 'show' : ''}`} aria-hidden={!selArr.length}>
-        <strong>{num(selArr.length)} seleccionado{selArr.length === 1 ? '' : 's'}</strong>
-        <button className="btn cl-call" disabled={busy || !selArr.length} onClick={() => llamar(selArr)}>
-          {busy ? 'Lanzando…' : `📞 Llamar a ${num(selArr.length)}`}
-        </button>
-        {activeList && (
-          <button className="mini-btn" disabled={busy} onClick={() => agregarALista(selArr)}>➕ A la lista</button>
-        )}
-        <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, true)}>Activar</button>
-        <button className="mini-btn" disabled={busy} onClick={() => setEnabled(selArr, false)}>Desactivar</button>
-        <HorarioCliente variant="bulk" count={selArr.length} disabled={busy} onSave={(h) => guardarHorario(selArr, h)} />
-        <button className="mini-btn" disabled={busy} onClick={() => guardarLista(selArr)}>💾 Guardar como lista</button>
-        <button className="mini-btn" onClick={() => setSel(new Set())} title="Limpiar selección">✕</button>
+                </Fragment>
+              );
+            })}
+            {slice.length === 0 && (
+              <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 30 }}>Ningún cliente coincide con los filtros.</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
