@@ -163,3 +163,36 @@ test('forzar follow up: sin vencido la promesa no se cierra y el follow up se ma
   assert.equal(r.cumplidas, undefined);
   assert.equal(r.follow_ups_encolados, 1);
 });
+
+test('forzar follow up con IVR: el follow up entra a la cola igual (la llamada normal no)', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], clientes(), cfg);
+  Object.assign(fake.tablas.cliente_config[0], { ivr: true, forzar_follow_up: true });
+  const r = await promesas.revisarAbiertas(clientes(), cfg);
+  assert.equal(r.follow_ups_encolados, 1);
+  assert.equal(t('promesa_pago')[0].estado, 'en_seguimiento');
+  const normal = await queue.enqueue([cliente], 'bulk', null, 'principal');
+  assert.equal(normal.omitidosIvr, 1, 'la llamada normal sigue filtrada por IVR');
+});
+
+test('reabrir una promesa cerrada sin llamada: vuelve a esperar y el motor la encola', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], clientes(), cfg);
+  fake.tablas.cliente_config[0].ivr = true;
+  await promesas.revisarAbiertas(clientes(), cfg);
+  const p = t('promesa_pago')[0];
+  assert.equal(p.estado, 'sin_llamada');
+  await assert.rejects(() => promesas.reabrir('no-existe'), /no existe/);
+
+  fake.tablas.cliente_config[0].forzar_follow_up = true;
+  await promesas.reabrir(p.id, 'yo@nebo');
+  assert.equal(p.estado, 'pendiente');
+  assert.equal(p.cerrada_at, null);
+  assert.equal(config().estado_cobro, 'promesa');
+  await assert.rejects(() => promesas.reabrir(p.id), /ya está abierta/);
+  const r = await promesas.revisarAbiertas(clientes(), cfg);
+  assert.equal(r.follow_ups_encolados, 1);
+  assert.equal(t('llamada_cola').filter((x) => x.estado === 'pendiente' && x.agente === 'seguimiento').length, 1);
+});

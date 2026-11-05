@@ -475,6 +475,26 @@ async function cancelarPorCambioManual(phones, por) {
   }
 }
 
+/**
+ * Reabre una promesa cerrada (super admins, para pruebas): vuelve a "Esperando
+ * la fecha" con sus reintentos en cero y el cliente vuelve al estado "promesa".
+ * En la próxima revisión, si la fecha ya llegó, el motor encola su follow up.
+ */
+async function reabrir(id, por = null) {
+  const [p] = (await db.select(TABLE, `?select=*&id=eq.${encodeURIComponent(id)}`)) || [];
+  if (!p) throw Object.assign(new Error('Esa promesa no existe'), { status: 404 });
+  if (ABIERTAS.includes(p.estado)) throw Object.assign(new Error('La promesa ya está abierta'), { status: 409 });
+  const otra = (await abiertasPorTelefono()).get(String(p.phone));
+  if (otra) throw Object.assign(new Error('Ese cliente ya tiene otra promesa abierta'), { status: 409 });
+  await db.update(TABLE, `?id=eq.${p.id}`, {
+    estado: 'pendiente', cerrada_at: null, motivo_cierre: null,
+    reintentos: 0, proximo_intento_at: null, seguimiento_at: null,
+  });
+  await clienteConfig.entrarEstado(String(p.phone), 'promesa', String(p.fecha_prometida).slice(0, 10));
+  console.log(`[promesas] reabierta ${p.id} (${p.phone})${por ? ` por ${por}` : ''}`);
+  return { ...p, estado: 'pendiente' };
+}
+
 /** Lista para la pestaña Promesas (más recientes primero). */
 async function lista(limit = 300) {
   const rows = await db.select(TABLE, `?select=*&order=created_at.desc&limit=${Math.min(1000, Math.max(1, limit))}`);
@@ -499,7 +519,7 @@ async function resumen() {
 }
 
 module.exports = {
-  correr, resumen, lista, cancelarPorCambioManual,
+  correr, resumen, lista, reabrir, cancelarPorCambioManual,
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,
   // puras (pruebas)

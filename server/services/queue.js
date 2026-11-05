@@ -46,7 +46,9 @@ async function enqueue(clientes, origen = 'bulk', por = null, agente = 'principa
 
   // Los que cayeron en IVR NUNCA se encolan (da igual el origen: cron, manual o masivo).
   const ivrPhones = await ivr.getIvrPhones();
-  const llamables = conTel.filter((c) => !ivrPhones.has(c.phone));
+  // Los follow ups con "forzar follow up" (🧪, pruebas) entran aunque el número tenga IVR.
+  const forzados = agente === 'seguimiento' ? await clienteConfig.getForzadosSet() : new Set();
+  const llamables = conTel.filter((c) => !ivrPhones.has(c.phone) || forzados.has(String(c.phone)));
   const omitidosIvr = conTel.length - llamables.length;
 
   if (!llamables.length) {

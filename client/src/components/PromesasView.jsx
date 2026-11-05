@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchPromesasLista, revisarPromesasAhora } from '../api';
+import { fetchPromesasLista, revisarPromesasAhora, reabrirPromesa } from '../api';
 import { money } from '../format';
 
 // Estados de una promesa (los pone el motor del follow up).
@@ -58,6 +58,7 @@ export default function PromesasView() {
   const [q, setQ] = useState('');
   const [at, setAt] = useState(null);
   const [revisando, setRevisando] = useState(false);
+  const [reabriendo, setReabriendo] = useState(null);
 
   const load = () => fetchPromesasLista()
     .then((d) => { setData(d); setErr(null); setAt(new Date()); })
@@ -75,6 +76,15 @@ export default function PromesasView() {
     try { await revisarPromesasAhora(); } catch (e) { setErr(e.message); }
     await load();
     setRevisando(false);
+  };
+
+  // Super admins: reabrir una promesa cerrada para volver a probar su follow up.
+  const reabrir = async (p) => {
+    if (!window.confirm(`¿Reabrir la promesa de ${p.nombre || p.phone} (fecha ${dia(p.fechaPrometida)})?\n\nVuelve a "Esperando la fecha" y, si la fecha ya llegó, su follow up entra a la cola ahora.`)) return;
+    setReabriendo(p.id);
+    try { await reabrirPromesa(p.id); await load(); }
+    catch (e) { window.alert(`No se pudo reabrir: ${e.message}`); }
+    finally { setReabriendo(null); }
   };
 
   const lista = data ? data.promesas : [];
@@ -168,7 +178,17 @@ export default function PromesasView() {
                   </td>
                   <td>{p.intento}.ª{p.intento >= data.tope ? ' (última)' : ''}</td>
                   <td className="num">{p.vencidoHoy == null ? '—' : money(p.vencidoHoy)}</td>
-                  <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{siguiente(p, data.pagoHoyHora)}</td>
+                  <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                    {siguiente(p, data.pagoHoyHora)}
+                    {data.superAdmin && !e.abierta && (
+                      <div style={{ marginTop: 4 }}>
+                        <button className="mini-btn" disabled={reabriendo === p.id} onClick={() => reabrir(p)}
+                          title="Solo super admins: vuelve a abrir la promesa para probar su follow up">
+                          {reabriendo === p.id ? '…' : '↺ Reabrir'}
+                        </button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               );
             })}
