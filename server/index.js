@@ -23,6 +23,7 @@ const schedule = require('./services/schedule');
 const agents = require('./services/agents');
 const promesas = require('./services/promesas');
 const fichas = require('./services/fichas');
+const iaCosto = require('./services/iaCosto');
 const history = require('./services/history');
 
 const app = express();
@@ -493,16 +494,14 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
     ]);
     // Ficha de la llamada que dejó cada promesa (retiro, hora pedida). Si un
     // follow up reprogramó sin repetir cómo paga, vale lo dicho en la anterior.
-    const porId = new Map(rows.map((r) => [String(r.id), r]));
+    // Solo lo que dijo en la llamada de ESTA promesa (no se hereda de promesas anteriores).
     const fichaDe = (r) => {
-      let x = r; let f = null; let saltos = 0;
-      while (x && saltos++ < 5) {
-        const fx = x.llamada_key ? fichasMap.get(x.llamada_key) : null;
-        if (fx && !f) f = { llamar: fx.llamar || null, disponibilidad: fx.disponibilidad || null };
-        if (fx && fx.modalidad) return { ...f, modalidad: fx.modalidad, retiro: fx.retiro || null };
-        x = x.promesa_anterior_id ? porId.get(String(x.promesa_anterior_id)) : null;
-      }
-      return f;
+      const fx = r.llamada_key ? fichasMap.get(r.llamada_key) : null;
+      if (!fx) return null;
+      return {
+        key: fx.llamada_key, llamadaAt: fx.llamada_at || null,
+        modalidad: fx.modalidad || null, retiro: fx.retiro || null, llamar: fx.llamar || null, disponibilidad: fx.disponibilidad || null,
+      };
     };
     const porTel = new Map((clientes || []).map((c) => [String(c.phone), c]));
     // Los números de prueba con su nombre y su vencido ficticio (solo super admins).
@@ -530,6 +529,41 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
     }
     res.json({ promesas: out, tope: cfg.promesaTope, followUpMargenDias: cfg.followUpMargenDias, retiroManana: cfg.retiroManana, retiroTarde: cfg.retiroTarde, superAdmin });
   } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
+// "No es retiro": corrección a mano de la ficha de una llamada.
+app.post('/api/fichas/no-retiro', requirePermission('cobranzas.promesas'), async (req, res) => {
+  try {
+    await fichas.marcarNoRetiro((req.body || {}).llamadaKey, req.user ? req.user.email : null);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
+// Costo de la IA que lee las llamadas y su cobro en Sword (solo super admins).
+app.get('/api/ia-consumo', soloSuperAdmin, async (req, res) => {
+  try { res.json(await iaCosto.resumen()); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+app.put('/api/ia-consumo/config', soloSuperAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const patch = {};
+    for (const k of ['precioEntrada', 'precioCache', 'precioSalida', 'margenPct', 'cobrarSword']) if (k in b) patch[k] = b[k];
+    await iaCosto.setConfig(patch, req.user ? req.user.email : null);
+    res.json(await iaCosto.resumen());
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+app.post('/api/ia-consumo/cobros/:id', soloSuperAdmin, async (req, res) => {
+  try {
+    await iaCosto.resolver(req.params.id, (req.body || {}).accion, req.user ? req.user.email : null);
+    res.json(await iaCosto.resumen());
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
 });
 
 // Reabrir una promesa cerrada (pruebas). Solo super admins. Corre el motor

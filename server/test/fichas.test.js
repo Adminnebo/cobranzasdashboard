@@ -15,7 +15,7 @@ const llamada = (id, extra = {}) => ({ id, phone: '8095550001', created_at: new 
 test('normalizar: retiro en la tarde usa las horas configuradas', () => {
   const f = fichas.normalizarFicha({ modalidad: 'retiro', retiro: { fecha: '2026-11-06', franja: 'tarde', texto: 'el viernes en la tarde' } }, cfg);
   assert.deepEqual(f.retiro, { fecha: '2026-11-06', franja: 'tarde', desde: '14:00', hasta: '18:00', texto: 'el viernes en la tarde' });
-  const g = fichas.normalizarFicha({ modalidad: 'retiro', retiro: { franja: 'hora', desde: '10:00' } }, cfg);
+  const g = fichas.normalizarFicha({ modalidad: 'retiro', retiro: { franja: 'hora', desde: '10:00', texto: 'pasen a las 10' } }, cfg);
   assert.equal(g.retiro.hasta, '11:00', 'una sola hora: una hora de ventana');
 });
 
@@ -34,7 +34,7 @@ test('procesar: guarda la ficha, ajusta el horario si no hay uno a mano y no rep
   let consultas = 0;
   const extraer = async (items) => {
     consultas++;
-    return new Map(items.map((i) => [i.id, { modalidad: 'retiro', retiro: { franja: 'tarde', fecha: '2026-11-06' },
+    return new Map(items.map((i) => [i.id, { modalidad: 'retiro', retiro: { franja: 'tarde', fecha: '2026-11-06', texto: 'Pasen a retirarlo el viernes en la tarde' },
       disponibilidad: { bloques: [{ dias: [2, 4], desde: '10:00', hasta: '10:30' }], texto: 'martes y jueves a las 10' } }]));
   };
   const r = await fichas.procesar([llamada(1), llamada(2, { resultado: 'no_answer' })], cfg, { extraer });
@@ -74,4 +74,40 @@ test('procesar: un horario puesto a mano no se pisa; si la IA falla, se reintent
   const r2 = await fichas.procesar([llamada(8)], cfg, { extraer: falla });
   assert.equal(r2.nuevas, 0);
   assert.equal((fake.tablas.llamada_ficha || []).some((f) => f.llamada_key === 'log:8'), false, 'sin marcar: se reintenta');
+});
+
+test('retiro: sin la frase del cliente, o con una que dijo Camila, no cuenta', () => {
+  const tr = 'AI: Si quiere, podemos pasar a buscar el pago.\nUser: No, yo lo deposito mañana.';
+  assert.equal(fichas.citaDelCliente('yo lo deposito mañana', tr), true);
+  assert.equal(fichas.citaDelCliente('podemos pasar a buscar el pago', tr), false, 'eso lo dijo Camila');
+  assert.equal(fichas.citaDelCliente('vengan a recoger el cheque', tr), false, 'inventada');
+  const sinCita = fichas.normalizarFicha({ modalidad: 'retiro', retiro: { franja: 'tarde' } }, cfg, tr);
+  assert.equal(sinCita.modalidad, null);
+  assert.equal(sinCita.retiro, null);
+  const deCamila = fichas.normalizarFicha({ modalidad: 'retiro', retiro: { franja: 'tarde', texto: 'podemos pasar a buscar el pago' } }, cfg, tr);
+  assert.equal(deCamila.modalidad, null);
+  const bien = fichas.normalizarFicha({ modalidad: 'retiro', retiro: { franja: 'tarde', texto: 'pasen a retirarlo el viernes' } }, cfg, TR);
+  assert.equal(bien.modalidad, 'retiro');
+});
+
+test('procesar: si la IA respondió ilegible, se marca con error y no se vuelve a pagar', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: '8095550001', enabled: true }];
+  let consultas = 0;
+  const extraer = async () => { consultas++; return { mapa: new Map(), error: 'respuesta ilegible de la IA' }; };
+  await fichas.procesar([llamada(21)], cfg, { extraer });
+  const f = fake.tablas.llamada_ficha.find((x) => x.llamada_key === 'log:21');
+  assert.equal(f.error, 'respuesta ilegible de la IA');
+  assert.equal(f.modalidad, null);
+  await fichas.procesar([llamada(21)], cfg, { extraer });
+  assert.equal(consultas, 1, 'no se repite');
+});
+
+test('"No es retiro": corrige la ficha a mano', async () => {
+  fake.reset();
+  fake.tablas.llamada_ficha = [{ llamada_key: 'log:30', phone: '8095550001', modalidad: 'retiro', retiro: { franja: 'tarde' } }];
+  await fichas.marcarNoRetiro('log:30', 'ana@jh.com');
+  assert.equal(fake.tablas.llamada_ficha[0].modalidad, 'no_retiro');
+  assert.equal(fake.tablas.llamada_ficha[0].corregida_por, 'ana@jh.com');
+  await assert.rejects(() => fichas.marcarNoRetiro('log:99'), /no tiene ficha/);
 });

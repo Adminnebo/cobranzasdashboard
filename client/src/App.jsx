@@ -324,7 +324,7 @@ export default function App() {
       {/* Quién necesita a una persona: flotante en todas las pestañas, cerrado por defecto. */}
       {puede('cobranzas.clientes') && (
         <AsistenciaFlotante clientes={data.clientes} verRetiros={puede('cobranzas.promesas')}
-          onPick={(phone) => { setTab('clientes'); setFoco({ phone, t: Date.now() }); }} />
+          onPick={(phone, llamada) => { setTab('clientes'); setFoco({ phone, llamada, t: Date.now() }); }} />
       )}
 
     </div>
