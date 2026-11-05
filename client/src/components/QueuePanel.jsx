@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { fetchQueue, cancelQueue } from '../api';
 import { num } from '../format';
+import ColaLista from './ColaLista';
 
 /** Estado de la cola de llamadas. Se refresca solo cada 30s. */
 export default function QueuePanel({ refreshKey }) {
   const [q, setQ] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [verLista, setVerLista] = useState(false);
 
   const load = () => fetchQueue().then(setQ).catch(() => {});
 
@@ -54,6 +56,12 @@ export default function QueuePanel({ refreshKey }) {
         )}
       </span>
       <span className="queue-hours">🕘 {q.horario}{q.clientesConHorario ? ` · ${q.clientesConHorario} con horario propio` : ''}</span>
+      {q.pendientes > 0 && (
+        <button className="mini-btn" onClick={() => setVerLista(true)} title="Ver quién está en la cola y en qué orden se va a llamar">
+          📋 Ver cola
+        </button>
+      )}
+      {verLista && <ColaLista onClose={() => setVerLista(false)} onChange={load} />}
       {q.pendientes > 0 && (
         <button className="mini-btn danger" disabled={busy} onClick={cancelar}>
           {busy ? '…' : 'Cancelar cola'}

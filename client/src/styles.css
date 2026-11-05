@@ -578,6 +578,8 @@ tbody tr:hover { background: var(--surface-2); }
 .pagos-modal { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.5); display: flex; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow-y: auto; }
 .pagos-modal__box { width: 100%; max-width: 560px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); }
 .pagos-modal__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-primary); }
+.cola-modal { max-width: 980px; }
+.cola-wrap { max-height: calc(100vh - 190px); overflow-y: auto; }
 .pagos-modal__frame { display: block; width: 100%; height: 620px; max-height: calc(100vh - 130px); border: 0; }
 
 /* Números de prueba (solo super admins) */

@@ -126,23 +126,30 @@ async function autoEnqueueEnabled() {
  *   2. follow ups (tienen fecha);
  *   3. el resto por orden de llegada.
  * Quien tiene horario propio cerrado espera; quien no tiene, sigue el general.
+ * ordenCola devuelve TODA la cola en ese orden (las que pueden salir ahora
+ * primero, luego las que esperan); elegirSiguiente toma la primera que puede.
  * @param rows     pendientes de llamada_cola
  * @param horarios Map<phone, bloques> (cliente_config.horario)
  */
-function elegirSiguiente(rows, horarios, cfg, d = new Date()) {
+function ordenCola(rows, horarios, cfg, d = new Date()) {
   const general = schedule.inWindow(cfg, d);
-  const candidatos = [];
-  for (const r of rows || []) {
+  const items = (rows || []).map((r) => {
     const h = horarios.get(String(r.phone));
-    const propio = h && schedule.bloquesCliente(cfg, h);
+    const propio = (h && schedule.bloquesCliente(cfg, h)) || null;
     const abierto = propio ? schedule.abiertoPara(cfg, h, d) : general;
-    if (abierto) candidatos.push({ r, propio: !!propio });
-  }
-  candidatos.sort((a, b) =>
-    (b.propio - a.propio)
+    return { r, propio, abierto };
+  });
+  items.sort((a, b) =>
+    (b.abierto - a.abierto)
+    || (!!b.propio - !!a.propio)
     || ((b.r.agente === 'seguimiento') - (a.r.agente === 'seguimiento'))
     || String(a.r.created_at).localeCompare(String(b.r.created_at)));
-  return candidatos.length ? candidatos[0].r : null;
+  return items;
+}
+
+function elegirSiguiente(rows, horarios, cfg, d = new Date()) {
+  const [primero] = ordenCola(rows, horarios, cfg, d);
+  return primero && primero.abierto ? primero.r : null;
 }
 
 /** ¿Hay alguna ventana abierta ahora (la general o la de algún cliente)? */
@@ -277,6 +284,45 @@ async function status() {
   };
 }
 
+/**
+ * La cola completa, en el orden en que el bot la va a llamar.
+ * estado: 'lista' (puede salir ya) | 'esperando_horario' (su horario propio está
+ * cerrado) | 'fuera_de_horario' (el horario general está cerrado o apagado).
+ */
+async function lista(limit = 500) {
+  const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=created_at.asc');
+  const cfg = await schedule.get();
+  const horarios = await clienteConfig.getHorarioMap();
+  const orden = ordenCola(rows, horarios, cfg);
+  const items = orden.slice(0, Math.max(1, limit)).map(({ r, propio, abierto }, i) => ({
+    id: r.id,
+    pos: i + 1,
+    phone: r.phone,
+    nombre: r.nombre,
+    empresa: r.empresa,
+    deuda_vencida: Number(r.deuda_vencida) || 0,
+    agente: r.agente || 'principal',
+    origen: r.origen,
+    encolada_por: r.encolada_por,
+    created_at: r.created_at,
+    fecha_prometida: r.fecha_prometida || null,
+    horario: propio,
+    estado: !cfg.enabled ? 'fuera_de_horario' : abierto ? 'lista' : propio ? 'esperando_horario' : 'fuera_de_horario',
+  }));
+  return { total: orden.length, items, horario: horarioTexto(cfg), enabled: cfg.enabled };
+}
+
+/** Quita UNA llamada pendiente de la cola. Devuelve la fila (o null si ya no estaba). */
+async function quitar(id, por = null) {
+  const [row] = (await db.select(TABLE, `?select=*&id=eq.${encodeURIComponent(id)}&estado=eq.pendiente`)) || [];
+  if (!row) return null;
+  await db.update(TABLE, `?id=eq.${encodeURIComponent(id)}`, {
+    estado: 'cancelada', detalle: `quitada a mano${por ? ` (${por})` : ''}`, enviada_at: new Date().toISOString(),
+  });
+  console.log(`[cola] quitada a mano: ${row.phone} (${row.nombre || 's/n'})${por ? ` por ${por}` : ''}`);
+  return row;
+}
+
 /** Cancela todas las pendientes. */
 async function cancelarTodo() {
   const n = await countPendientes();
@@ -285,4 +331,4 @@ async function cancelarTodo() {
   return { canceladas: n };
 }
 
-module.exports = { enqueue, tick, status, cancelarTodo, autoEnqueueEnabled, elegirSiguiente, algunaAbierta, TZ };
+module.exports = { enqueue, tick, status, lista, quitar, cancelarTodo, autoEnqueueEnabled, ordenCola, elegirSiguiente, algunaAbierta, TZ };
