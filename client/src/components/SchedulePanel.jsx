@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchSchedule, saveSchedule } from '../api';
+import IaCosto from './IaCosto';
 
 /** Configura el horario de llamadas (bloques). El agente que llama ya guardado se conserva tal cual. */
-export default function SchedulePanel({ onSaved }) {
+export default function SchedulePanel({ onSaved, superAdmin = false }) {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -165,6 +166,9 @@ export default function SchedulePanel({ onSaved }) {
               <input type="time" value={cfg.horarioClienteHasta || '19:00'} onChange={(e) => set({ horarioClienteHasta: e.target.value })} />
             </div>
           </div>
+
+          {/* Costo de la IA y su cobro en Sword: solo super admins. */}
+          {superAdmin && <IaCosto />}
 
           {err && <div className="sched-err">{err}</div>}
 

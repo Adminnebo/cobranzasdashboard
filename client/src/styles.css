@@ -673,8 +673,23 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .asis-panel__foot { border-top: 1px solid var(--grid); padding: 9px 14px; font-size: 0.74rem; color: var(--text-muted); }
 .asis-sec { padding: 10px 14px 2px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 700; }
 .asis-empty { padding: 18px 14px; color: var(--text-muted); font-size: 0.82rem; }
-.asis-item { display: block; width: 100%; text-align: left; font: inherit; border: none; background: none; color: inherit; padding: 8px 14px; cursor: pointer; border-left: 3px solid transparent; }
+.asis-item { display: flex; align-items: center; gap: 6px; border-left: 3px solid transparent; padding-right: 10px; }
 .asis-item:hover { background: var(--surface-2); }
+/* Costo de la IA (Horario, solo super admins) */
+.ia-costo__nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ia-costo__nums div { background: var(--surface-2); border-radius: 9px; padding: 6px 8px; min-width: 0; }
+.ia-costo__nums b { display: block; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.ia-costo__nums span { font-size: 0.66rem; color: var(--text-muted); }
+.ia-costo__precios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
+.ia-costo__precios label { display: flex; flex-direction: column; gap: 2px; font-size: 0.7rem; color: var(--text-muted); }
+.ia-costo__precios input { width: 100%; font: inherit; font-size: 0.8rem; padding: 5px 7px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
+.ia-costo__cobros { margin-top: 8px; border-top: 1px dashed var(--grid); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.ia-costo__cobro { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 0.76rem; }
+.ia-costo__cobro b { font-variant-numeric: tabular-nums; }
+.ia-costo__acc { display: flex; gap: 4px; width: 100%; }
+.asis-item__main { flex: 1; min-width: 0; display: block; text-align: left; font: inherit; border: none; background: none; color: inherit; padding: 8px 4px 8px 14px; cursor: pointer; }
+.asis-item__accion { flex: none; font: inherit; font-size: 0.7rem; font-weight: 600; white-space: nowrap; cursor: pointer; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary); }
+.asis-item__accion:hover:not(:disabled) { color: var(--critical); border-color: var(--critical); }
 .asis-item.alerta { border-left-color: var(--critical); }
 .asis-item.hoy { border-left-color: var(--series-1); }
 .asis-item__l1 { display: flex; justify-content: space-between; gap: 8px; }

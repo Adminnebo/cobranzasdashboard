@@ -102,6 +102,11 @@ export const fetchPruebas = () => get('/api/pruebas');
 export const fetchPromesasLista = () => get('/api/promesas/lista');
 export const revisarPromesasAhora = () => post('/api/promesas/revisar', {});
 export const reabrirPromesa = (id) => post(`/api/promesas/${encodeURIComponent(id)}/reabrir`, {});
+export const marcarNoRetiro = (llamadaKey) => post('/api/fichas/no-retiro', { llamadaKey });
+// Costo de la IA que lee las llamadas y su cobro en Sword (solo super admins).
+export const fetchIaConsumo = () => get('/api/ia-consumo');
+export const saveIaConfig = (cfg) => put('/api/ia-consumo/config', cfg);
+export const resolverCobroIa = (id, accion) => post(`/api/ia-consumo/cobros/${encodeURIComponent(id)}`, { accion });
 export const addPrueba = (phone, nota) => post('/api/pruebas', { phone, nota });
 export const removePrueba = (phone) => del(`/api/pruebas/${encodeURIComponent(phone)}`);
 export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '?refresh=1' : ''}`);

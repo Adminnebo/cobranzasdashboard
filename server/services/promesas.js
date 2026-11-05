@@ -28,6 +28,7 @@ const queue = require('./queue');
 const schedule = require('./schedule');
 const clienteConfig = require('./clienteConfig');
 const pruebas = require('./pruebas');
+const iaCosto = require('./iaCosto');
 const fichas = require('./fichas');
 const { getCachedData } = require('./cache');
 
@@ -439,6 +440,9 @@ async function correr({ fresco = false } = {}) {
     // si la IA falla, las promesas siguen igual y la ficha se reintenta luego.
     try { await fichas.procesar(llamadas, cfg); }
     catch (err) { console.error('[fichas] falló:', err.message); }
+    // Cobro en Sword del gasto de la IA de los días ya cerrados (si está prendido).
+    try { await iaCosto.cobrar(); }
+    catch (err) { console.error('[ia-costo] falló:', err.message); }
     const out = { llamadas: r1, promesas: r2 };
     if (r1.nuevas || Object.keys(r2).length) console.log('[promesas]', JSON.stringify(out));
     return out;

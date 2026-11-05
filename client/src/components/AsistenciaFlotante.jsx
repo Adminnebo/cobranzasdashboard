@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchPromesasLista } from '../api';
+import { fetchPromesasLista, marcarNoRetiro } from '../api';
 import { money, phoneFmt } from '../format';
 import { dia, ymdRD } from './PromesasView';
 
@@ -57,17 +57,23 @@ export function agruparRetiros(promesas) {
   return out;
 }
 
-function Item({ nombre, prueba, monto, linea, cls, onClick }) {
+function Item({ nombre, prueba, monto, linea, cls, onClick, titulo, accion }) {
   return (
-    <button className={`asis-item ${cls || ''}`} onClick={onClick} title="Ir a este cliente en Clientes y llamadas">
-      <span className="asis-item__l1">
-        <span className="asis-item__name">{nombre}{prueba && <span className="tag-prueba">Prueba</span>}</span>
-        {monto != null && <span className="asis-item__num">{money(monto)}</span>}
-      </span>
-      <span className="asis-item__l2">{linea}</span>
-    </button>
+    <div className={`asis-item ${cls || ''}`}>
+      <button className="asis-item__main" onClick={onClick} title={titulo || 'Ir a este cliente en Clientes y llamadas'}>
+        <span className="asis-item__l1">
+          <span className="asis-item__name">{nombre}{prueba && <span className="tag-prueba">Prueba</span>}</span>
+          {monto != null && <span className="asis-item__num">{money(monto)}</span>}
+        </span>
+        <span className="asis-item__l2">{linea}</span>
+      </button>
+      {accion}
+    </div>
   );
 }
+
+// "log:123" → 123 (el id de la llamada en la tabla de llamadas).
+const idDeKey = (k) => (/^log:/.test(String(k || '')) ? String(k).slice(4) : null);
 
 /**
  * Pestaña flotante en el borde derecho, en todas las pestañas de Cobranzas.
@@ -77,14 +83,24 @@ export default function AsistenciaFlotante({ clientes, verRetiros, onPick }) {
   const [abierto, setAbierto] = useState(false);
   const [vista, setVista] = useState('asistencia');
   const [prom, setProm] = useState(null);
+  const [corrigiendo, setCorrigiendo] = useState(null);
+  const [errRet, setErrRet] = useState(null);
 
+  const cargar = () => fetchPromesasLista().then(setProm).catch(() => {});
   useEffect(() => {
     if (!verRetiros) return undefined;
-    const load = () => fetchPromesasLista().then(setProm).catch(() => {});
-    load();
-    const id = setInterval(load, 60000);
+    cargar();
+    const id = setInterval(cargar, 60000);
     return () => clearInterval(id);
-  }, [verRetiros]);
+  }, [verRetiros]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const noEsRetiro = async (p) => {
+    if (!window.confirm(`¿${p.nombre || phoneFmt(p.phone)} no pidió que pasen a buscar el pago?\n\nSale de la lista de retiros (la promesa sigue igual).`)) return;
+    setCorrigiendo(p.id); setErrRet(null);
+    try { await marcarNoRetiro(p.ficha.key); await cargar(); }
+    catch (e) { setErrRet(e.message); }
+    finally { setCorrigiendo(null); }
+  };
 
   useEffect(() => {
     if (!abierto) return undefined;
@@ -97,7 +113,7 @@ export default function AsistenciaFlotante({ clientes, verRetiros, onPick }) {
   const ret = useMemo(() => agruparRetiros(prom && prom.promesas), [prom]);
   const nRet = ret.hoy.length + ret.manana.length + ret.proximos.length;
   const n = lista.length;
-  const ir = (phone) => onPick(String(phone));
+  const ir = (phone, llamada) => onPick(String(phone), llamada || null);
 
   if (!abierto) {
     return (
@@ -134,13 +150,22 @@ export default function AsistenciaFlotante({ clientes, verRetiros, onPick }) {
         {vista === 'retiros' && (
           <>
             {!prom && <div className="asis-empty">Cargando…</div>}
+            {errRet && <div className="sched-err" style={{ padding: '8px 14px' }}>{errRet}</div>}
             {prom && !nRet && <div className="asis-empty">Nadie pidió que pasen a retirar el pago. Aparecen aquí cuando el cliente lo dice en una llamada.</div>}
             {[['hoy', 'Hoy'], ['manana', 'Mañana'], ['proximos', 'Próximos']].map(([k, lbl]) => ret[k].length > 0 && (
               <div key={k}>
                 <div className="asis-sec">{lbl}</div>
                 {ret[k].map((p) => (
                   <Item key={p.id} nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''}
-                    linea={`${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`} onClick={() => ir(p.phone)} />
+                    linea={`${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
+                    titulo="Ver la llamada donde lo pidió (en Clientes y llamadas)"
+                    onClick={() => ir(p.phone, { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })}
+                    accion={p.ficha.key && (
+                      <button className="asis-item__accion" disabled={corrigiendo === p.id} onClick={() => noEsRetiro(p)}
+                        title="La IA se equivocó: sacarlo de los retiros">
+                        {corrigiendo === p.id ? '…' : 'No es retiro'}
+                      </button>
+                    )} />
                 ))}
               </div>
             ))}
@@ -151,7 +176,7 @@ export default function AsistenciaFlotante({ clientes, verRetiros, onPick }) {
       <div className="asis-panel__foot">
         {vista === 'asistencia'
           ? 'Ningún agente los llama. Salen de aquí cuando alguien los vuelve a prender en Clientes.'
-          : 'Lo lee la IA de lo que dice el cliente. Si ya no debe, sale de la lista.'}
+          : 'Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro". Si ya no debe, sale solo.'}
       </div>
     </aside>
   );

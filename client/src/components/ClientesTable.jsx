@@ -383,7 +383,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
       <div className="cola-header">
         <QueuePanel refreshKey={queueKey} />
         <ListsPanel refreshKey={listsKey} onLoad={cargarLista} />
-        <SchedulePanel onSaved={() => setQueueKey((k) => k + 1)} />
+        <SchedulePanel superAdmin={superAdmin} onSaved={() => setQueueKey((k) => k + 1)} />
       </div>
 
       <div className="toolbar">
