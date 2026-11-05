@@ -779,3 +779,15 @@ tbody tr:hover { background: var(--surface-2); }
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text-secondary); }
 .horario-dia.on { background: var(--series-1); border-color: var(--series-1); color: #fff; }
 .horario-dias__nota { font-size: 0.68rem; color: var(--text-muted); margin-left: 4px; }
+
+/* Ficha de la llamada (retiro, hora pedida, disponibilidad) */
+.ficha-lineas { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ficha-lineas:empty { display: none; }
+.ficha-tag { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+.ficha-tag--retiro { border-color: color-mix(in srgb, var(--series-8) 50%, transparent); color: var(--series-8); }
+.prom-item__tag { margin-left: 6px; font-size: 0.8rem; }
+.prom-side__tabs { display: flex; gap: 4px; background: var(--surface-2); border-radius: 10px; padding: 3px; margin-bottom: 10px; }
+.prom-side__tabs button { flex: 1; font: inherit; font-size: 0.82rem; font-weight: 600; border: none; background: none; color: var(--text-secondary); padding: 6px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.prom-side__tabs button.on { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow); cursor: default; }
+.horario-chip--ia { border-style: dashed; }
+.horario-ia-nota { font-size: 0.74rem; color: var(--text-secondary); background: var(--surface-2); border-radius: 8px; padding: 7px 9px; margin-top: -4px; }

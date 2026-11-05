@@ -20,7 +20,7 @@ export const horarioTexto = (h) => (h || []).map((b) => `${diasTexto(b.dias)}${b
  * variant: 'chip' (muestra el horario, va bajo el nombre) | 'btn' (🕘 en Acción)
  *          | 'bulk' (para la selección) | 'menu' (opción del menú ⋯ de la fila).
  */
-export default function HorarioCliente({ horario, count = 1, onSave, disabled, variant = 'btn' }) {
+export default function HorarioCliente({ horario, origen, detalle, count = 1, onSave, disabled, variant = 'btn' }) {
   const [open, setOpen] = useState(false);
   const [blocks, setBlocks] = useState([]);
   const [cfg, setCfg] = useState(null);
@@ -90,9 +90,11 @@ export default function HorarioCliente({ horario, count = 1, onSave, disabled, v
     )
     : variant === 'chip'
     ? (
-      <button ref={btnRef} className="horario-chip" disabled={disabled} onClick={() => (open ? setOpen(false) : abrir())}
-        title="Horario propio: el bot lo llama solo en estas horas, antes que al resto. Click para cambiarlo.">
-        🕘 {horarioTexto(horario)}
+      <button ref={btnRef} className={`horario-chip ${origen === 'ia' ? 'horario-chip--ia' : ''}`} disabled={disabled} onClick={() => (open ? setOpen(false) : abrir())}
+        title={origen === 'ia'
+          ? `Horario que dio el cliente (lo puso el sistema${detalle ? `: ${detalle}` : ''}). El bot lo llama solo en estas horas. Click para cambiarlo; si lo cambias tú, el sistema ya no lo toca.`
+          : 'Horario propio: el bot lo llama solo en estas horas, antes que al resto. Click para cambiarlo.'}>
+        {origen === 'ia' ? '🤖' : '🕘'} {horarioTexto(horario)}
       </button>
     )
     : (
@@ -110,6 +112,9 @@ export default function HorarioCliente({ horario, count = 1, onSave, disabled, v
           <div className="sched-lbl">
             Horario propio{count > 1 ? ` de ${count} clientes` : ''}
           </div>
+          {origen === 'ia' && (
+            <div className="horario-ia-nota">🤖 Lo puso el sistema con lo que dijo el cliente{detalle ? `: ${detalle}` : ''}. Si lo guardas, queda como puesto a mano y el sistema ya no lo cambia.</div>
+          )}
           <div className="sched-tz" style={{ marginTop: -4 }}>
             El bot lo llama solo en estas horas, y antes que al resto. Puede salirse del horario general{cfg ? ` (${horarioTexto(cfg.blocks)})` : ''}, pero no de {desde}–{hasta}. Marca días en un bloque para que valga solo esos días (ej. solo martes); sin días, valen los del horario general.
           </div>

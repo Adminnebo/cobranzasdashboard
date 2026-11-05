@@ -10,7 +10,7 @@ import ListsPanel from './ListsPanel';
 import ClientCalls from './ClientCalls';
 import HorarioCliente, { horarioTexto } from './HorarioCliente';
 import PromesasLateral, { agruparPromesas } from './PromesasLateral';
-import { estadoDe, dia, siguiente, ymdRD } from './PromesasView';
+import { estadoDe, dia, siguiente, ymdRD, FichaLineas } from './PromesasView';
 
 const sortValue = {
   name: (c) => (c.name || '').toLowerCase(),
@@ -697,7 +697,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                         </button>
                       )}
                       {c.phone && c.horario && c.horario.length > 0 && (
-                        <HorarioCliente variant="chip" horario={c.horario} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
+                        <HorarioCliente variant="chip" horario={c.horario} origen={c.horarioOrigen} detalle={c.horarioDetalle} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
                       )}
                     </div>
                   </div>
@@ -789,7 +789,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                         <span>Deuda total</span><span>{money(c.deuda_total)}</span>
                         <span>Vencido</span><span>{money(c.deuda_vencida)} ({pv}%)</span>
                         <span>Crédito</span><span>{money(c.credito_ofrecido)}{c.credito_ofrecido > 0 ? ` · uso ${util}%` : ''}</span>
-                        <span>Horario</span><span>{c.horario && c.horario.length ? horarioTexto(c.horario) : 'el general'}</span>
+                        <span>Horario</span><span>{c.horario && c.horario.length ? `${c.horarioOrigen === 'ia' ? '🤖 ' : ''}${horarioTexto(c.horario)}${c.horarioOrigen === 'ia' && c.horarioDetalle ? ` (${c.horarioDetalle})` : ''}` : 'el general'}</span>
                         {c.ivr && <><span>IVR</span><span>{c.ivrDetalle || (c.ivrTipo === 'buzon' ? 'Buzón' : 'IVR de empresa')}</span></>}
                       </div>
                     </div>
@@ -808,6 +808,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                             <span>Promesa</span><span>{p.intento || 1}.ª{prom && p.intento >= prom.tope ? ' (última)' : ''}</span>
                             <span>{pAbierta ? 'Qué sigue' : 'Cierre'}</span><span>{siguiente(p, prom && prom.pagoHoyHora) || '—'}</span>
                           </div>
+                          <FichaLineas ficha={p.ficha} fechaPrometida={p.fechaPrometida} />
                           {!pAbierta && <div className="cl-meta" style={{ marginTop: 6 }}>Última promesa, ya cerrada. No tiene una abierta.</div>}
                           {onVerPromesas && <div style={{ marginTop: 10 }}><button className="mini-btn" onClick={onVerPromesas}>Ver en Promesas</button></div>}
                         </>

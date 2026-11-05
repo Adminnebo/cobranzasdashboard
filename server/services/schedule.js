@@ -42,6 +42,16 @@ const DEFAULT = {
   // Días hábiles después de la fecha prometida para el follow up (deja que el
   // pago se refleje). Con 1: "pago mañana" (jue) -> follow up el vie.
   followUpMargenDias: 1,
+  // Retiros: horas de "en la mañana" y "en la tarde" cuando piden que pasen a buscar el pago.
+  retiroManana: { desde: '08:00', hasta: '12:00' },
+  retiroTarde: { desde: '14:00', hasta: '18:00' },
+  // Ajustar solo el horario propio con lo que dice el cliente ("solo puedo los martes").
+  // Arranca apagado: primero se revisa en Promesas que la IA lea bien.
+  horarioAuto: false,
+};
+const franja = (desde, hasta, def) => {
+  const d = hhmm(desde, def.desde), h = hhmm(hasta, def.hasta);
+  return toMins(h) > toMins(d) ? { desde: d, hasta: h } : { ...def };
 };
 
 // Días de la semana: 1 = lunes … 7 = domingo.
@@ -127,6 +137,9 @@ async function get(force = false) {
         horarioClienteHasta: hhmm(row.horario_cliente_hasta, DEFAULT.horarioClienteHasta),
         pagoHoyHora: hhmm(row.pago_hoy_hora, DEFAULT.pagoHoyHora),
         followUpMargenDias: entero(row.follow_up_margen_dias, DEFAULT.followUpMargenDias, 0, 5),
+        retiroManana: franja(row.retiro_manana_desde, row.retiro_manana_hasta, DEFAULT.retiroManana),
+        retiroTarde: franja(row.retiro_tarde_desde, row.retiro_tarde_hasta, DEFAULT.retiroTarde),
+        horarioAuto: row.horario_auto == null ? DEFAULT.horarioAuto : !!row.horario_auto,
         tz: TZ,
       }
     : { ...DEFAULT, lastEnqueueDate: null, tz: TZ };
@@ -229,6 +242,16 @@ async function set(patch, by) {
   if ('pagoHoyHora' in patch) rango.pago_hoy_hora = hhmm(next.pagoHoyHora, DEFAULT.pagoHoyHora);
   // Y el margen del follow up (sql/007).
   if ('followUpMargenDias' in patch) rango.follow_up_margen_dias = entero(next.followUpMargenDias, DEFAULT.followUpMargenDias, 0, 5);
+  // Retiros y horario automático (sql/008).
+  if ('retiroManana' in patch) {
+    const f = franja(next.retiroManana && next.retiroManana.desde, next.retiroManana && next.retiroManana.hasta, DEFAULT.retiroManana);
+    Object.assign(rango, { retiro_manana_desde: f.desde, retiro_manana_hasta: f.hasta });
+  }
+  if ('retiroTarde' in patch) {
+    const f = franja(next.retiroTarde && next.retiroTarde.desde, next.retiroTarde && next.retiroTarde.hasta, DEFAULT.retiroTarde);
+    Object.assign(rango, { retiro_tarde_desde: f.desde, retiro_tarde_hasta: f.hasta });
+  }
+  if ('horarioAuto' in patch) rango.horario_auto = !!next.horarioAuto;
   await db.upsert(TABLE, {
     id: 1,
     ...rango,

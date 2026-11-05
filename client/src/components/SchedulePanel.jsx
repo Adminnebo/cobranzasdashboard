@@ -13,8 +13,9 @@ export default function SchedulePanel({ onSaved }) {
   const rangoInicial = useRef(null);
   const pagoHoyInicial = useRef(null);
   const margenInicial = useRef(null);
+  const extrasInicial = useRef(null);
   useEffect(() => {
-    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; pagoHoyInicial.current = c.pagoHoyHora; margenInicial.current = c.followUpMargenDias; setCfg(c); }).catch(() => {});
+    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; pagoHoyInicial.current = c.pagoHoyHora; margenInicial.current = c.followUpMargenDias; extrasInicial.current = JSON.stringify([c.retiroManana, c.retiroTarde, c.horarioAuto]); setCfg(c); }).catch(() => {});
   }, []);
   // Los agentes se cargan al abrir el panel (no en cada render de la app).
   useEffect(() => {
@@ -55,6 +56,14 @@ export default function SchedulePanel({ onSaved }) {
     if (cfg.pagoHoyHora && cfg.pagoHoyHora !== pagoHoyInicial.current) rango.pagoHoyHora = cfg.pagoHoyHora;
     // Y el margen del follow up (sql/007).
     if (cfg.followUpMargenDias != null && Number(cfg.followUpMargenDias) !== Number(margenInicial.current)) rango.followUpMargenDias = Number(cfg.followUpMargenDias);
+    // Retiros y horario automático (sql/008): solo si cambiaron.
+    if (JSON.stringify([cfg.retiroManana, cfg.retiroTarde, cfg.horarioAuto]) !== extrasInicial.current) {
+      for (const [k, f] of [['retiroManana', cfg.retiroManana], ['retiroTarde', cfg.retiroTarde]]) {
+        if (f && f.hasta <= f.desde) { setErr('Las horas de los retiros tienen que terminar después de empezar.'); return; }
+        rango[k] = f;
+      }
+      rango.horarioAuto = cfg.horarioAuto !== false;
+    }
     setSaving(true);
     try {
       const saved = await saveSchedule({
@@ -66,6 +75,7 @@ export default function SchedulePanel({ onSaved }) {
       rangoInicial.current = `${saved.horarioClienteDesde}-${saved.horarioClienteHasta}`;
       pagoHoyInicial.current = saved.pagoHoyHora;
       margenInicial.current = saved.followUpMargenDias;
+      extrasInicial.current = JSON.stringify([saved.retiroManana, saved.retiroTarde, saved.horarioAuto]);
       setCfg(saved);
       setOpen(false);
       if (onSaved) onSaved();
@@ -135,6 +145,26 @@ export default function SchedulePanel({ onSaved }) {
               <span>Horas para reintentar si no contesta (2.º intento al día siguiente)</span>
               <input type="number" min="1" max="8" value={cfg.reintentoHoras ?? 2} onChange={(e) => set({ reintentoHoras: e.target.value })} />
             </label>
+          </div>
+
+          <div className="sched-blocks">
+            <div className="sched-lbl">Lo que dice el cliente</div>
+            <label className="sched-check" style={{ marginBottom: 8 }}>
+              <input type="checkbox" checked={cfg.horarioAuto !== false} onChange={(e) => set({ horarioAuto: e.target.checked })} />
+              Ajustar solo el horario propio cuando el cliente da uno ("solo puedo los martes a las 10"). Nunca cambia uno puesto a mano.
+            </label>
+            <div className="sched-tz" style={{ marginBottom: 6 }}>Retiros: horas de "en la mañana" y "en la tarde"</div>
+            {[['retiroManana', 'Mañana', { desde: '08:00', hasta: '12:00' }], ['retiroTarde', 'Tarde', { desde: '14:00', hasta: '18:00' }]].map(([k, lbl, def]) => {
+              const f = cfg[k] || def;
+              return (
+                <div className="sched-block" key={k}>
+                  <span style={{ width: 52 }}>{lbl}</span>
+                  <input type="time" value={f.desde} onChange={(e) => set({ [k]: { ...f, desde: e.target.value } })} />
+                  <span>a</span>
+                  <input type="time" value={f.hasta} onChange={(e) => set({ [k]: { ...f, hasta: e.target.value } })} />
+                </div>
+              );
+            })}
           </div>
 
           {/* Rango dentro del cual puede caer el horario propio de un cliente. */}

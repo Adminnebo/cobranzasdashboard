@@ -50,6 +50,33 @@ export function siguiente(p, pagoHoyHora) {
   return p.motivoCierre || '';
 }
 
+/** Lo que dijo el cliente sobre cómo y cuándo (lo lee la IA de la llamada). */
+export function FichaLineas({ ficha, fechaPrometida }) {
+  if (!ficha) return null;
+  const r = ficha.retiro || {};
+  const l = ficha.llamar;
+  const d = ficha.disponibilidad;
+  return (
+    <div className="ficha-lineas">
+      {ficha.modalidad === 'retiro' && (
+        <span className="ficha-tag ficha-tag--retiro" title={r.texto ? `Dijo: "${r.texto}"` : 'Pidió que pasen a retirar el pago'}>
+          🚚 Retiro {dia(r.fecha || fechaPrometida)}{r.desde ? ` · ${r.desde}–${r.hasta}` : ''}
+        </span>
+      )}
+      {l && (
+        <span className="ficha-tag" title={l.texto ? `Dijo: "${l.texto}"` : 'Pidió que lo llamen a esta hora'}>
+          📞 Pidió llamada {l.fecha ? `${dia(l.fecha)} ` : ''}a las {l.hora}
+        </span>
+      )}
+      {d && d.bloques && (
+        <span className="ficha-tag" title={d.texto ? `Dijo: "${d.texto}"` : 'Horario que dio el cliente'}>
+          🕘 Disponible {d.bloques.map((b) => `${b.start}–${b.end}`).join(', ')}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** Pestaña Promesas: cada promesa de pago, su estado y qué sigue. */
 export default function PromesasView() {
   const [data, setData] = useState(null);
@@ -180,6 +207,7 @@ export default function PromesasView() {
                   <td className="num">{p.vencidoHoy == null ? '—' : money(p.vencidoHoy)}</td>
                   <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
                     {siguiente(p, data.pagoHoyHora)}
+                    <FichaLineas ficha={p.ficha} fechaPrometida={p.fechaPrometida} />
                     {data.superAdmin && !e.abierta && (
                       <div style={{ marginTop: 4 }}>
                         <button className="mini-btn" disabled={reabriendo === p.id} onClick={() => reabrir(p)}

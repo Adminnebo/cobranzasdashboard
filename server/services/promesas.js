@@ -28,6 +28,7 @@ const queue = require('./queue');
 const schedule = require('./schedule');
 const clienteConfig = require('./clienteConfig');
 const pruebas = require('./pruebas');
+const fichas = require('./fichas');
 const { getCachedData } = require('./cache');
 
 const TABLE = 'promesa_pago';
@@ -456,6 +457,10 @@ async function correr({ fresco = false } = {}) {
     const llamadas = [...(data.llamadas || []), ...(data.llamadasPrueba || [])];
     const r1 = await procesarLlamadas(llamadas, clientesPorTel, cfg);
     const r2 = await revisarAbiertas(clientesPorTel, cfg);
+    // Ficha de cada llamada (retiro, hora pedida, horario que se repite). Aparte:
+    // si la IA falla, las promesas siguen igual y la ficha se reintenta luego.
+    try { await fichas.procesar(llamadas, cfg); }
+    catch (err) { console.error('[fichas] falló:', err.message); }
     const out = { llamadas: r1, promesas: r2 };
     if (r1.nuevas || Object.keys(r2).length) console.log('[promesas]', JSON.stringify(out));
     return out;
