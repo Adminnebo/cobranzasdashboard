@@ -393,7 +393,11 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
         if (fecha > hoy) continue;
         // Prometió hoy para hoy ("pago hoy"): el follow up sale a la hora de la
         // tarde configurada, no minutos después de colgar (también los de prueba).
-        if (pagoHoyEspera(p.fecha_llamada, hoy, cfg, ahoraFecha)) continue;
+        const esPagoHoy = p.fecha_llamada && ymdInTz(new Date(p.fecha_llamada)) === fecha;
+        if (esPagoHoy && pagoHoyEspera(p.fecha_llamada, hoy, cfg, ahoraFecha)) continue;
+        // El resto: el follow up sale N días hábiles después de la fecha prometida
+        // (margen configurable, para que el pago alcance a reflejarse).
+        if (!esPagoHoy && schedule.fechaFollowUp(fecha, cfg) > hoy) continue;
         if (fecha < corteViejas) {
           await cerrar(p, 'vieja', `más de ${cfg.promesaMaxAtraso} días de atraso`);
           await clienteConfig.salirEstado(phone);

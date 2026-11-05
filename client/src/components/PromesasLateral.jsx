@@ -15,12 +15,14 @@ export function agruparPromesas(promesas) {
   const corte = Date.now() - DIAS_ATENCION * 86400000;
   const out = { hoy: [], proximas: [], atencion: [] };
   for (const p of promesas || []) {
-    const fecha = String(p.fechaPrometida || '').slice(0, 10);
-    if (p.estado === 'en_seguimiento' || (p.estado === 'pendiente' && fecha <= hoy)) out.hoy.push(p);
+    // Fecha en que sale el follow up (la prometida + el margen); "pago hoy" sale el mismo día.
+    const fecha = String(p.followUpFecha || p.fechaPrometida || '').slice(0, 10);
+    const pagoHoy = p.prometidaEl && ymdRD(new Date(p.prometidaEl)) === String(p.fechaPrometida).slice(0, 10);
+    if (p.estado === 'en_seguimiento' || (p.estado === 'pendiente' && (pagoHoy ? String(p.fechaPrometida).slice(0, 10) : fecha) <= hoy)) out.hoy.push(p);
     else if (p.estado === 'pendiente') out.proximas.push(p);
     else if ((p.estado === 'escalada' || p.estado === 'incumplida') && Date.parse(p.cerradaAt || 0) >= corte) out.atencion.push(p);
   }
-  out.proximas.sort((a, b) => String(a.fechaPrometida).localeCompare(String(b.fechaPrometida)));
+  out.proximas.sort((a, b) => String(a.followUpFecha || a.fechaPrometida).localeCompare(String(b.followUpFecha || b.fechaPrometida)));
   out.atencion.sort((a, b) => String(b.cerradaAt).localeCompare(String(a.cerradaAt)));
   return out;
 }
@@ -66,7 +68,7 @@ export default function PromesasLateral({ data, error, onPick, onVerTodas }) {
         {g.proximas.length > 0 && <div className="prom-side__sec">Próximas</div>}
         {g.proximas.map((p) => (
           <Item key={p.id} p={p} onPick={onPick}
-            linea={`${dia(p.fechaPrometida)} · ${p.intento || 1}.ª promesa${p.textoOriginal ? ` · "${p.textoOriginal}"` : ''}`} />
+            linea={`promete ${dia(p.fechaPrometida)}${p.followUpFecha && p.followUpFecha !== String(p.fechaPrometida).slice(0, 10) ? ` · follow up ${dia(p.followUpFecha)}` : ''} · ${p.intento || 1}.ª${p.textoOriginal ? ` · "${p.textoOriginal}"` : ''}`} />
         ))}
         {g.atencion.length > 0 && <div className="prom-side__sec">Necesitan a alguien</div>}
         {g.atencion.map((p) => (

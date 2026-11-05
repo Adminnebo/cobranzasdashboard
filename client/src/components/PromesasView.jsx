@@ -41,7 +41,7 @@ export function siguiente(p, pagoHoyHora) {
         ? `Prometió pagar hoy después de las ${pagoHoyHora}: follow up mañana si sigue debiendo`
         : `Prometió pagar hoy: follow up hoy a las ${pagoHoyHora} si sigue debiendo`;
     }
-    return `Follow up el ${dia(p.fechaPrometida)} si sigue debiendo`;
+    return `Follow up el ${dia(p.followUpFecha || p.fechaPrometida)} si sigue debiendo`;
   }
   if (p.estado === 'en_seguimiento') {
     if (p.proximoIntento) return `No contestó · reintento ${p.reintentos} de 2: ${momento(p.proximoIntento)}`;

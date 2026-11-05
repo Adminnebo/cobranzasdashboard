@@ -770,3 +770,12 @@ tbody tr:hover { background: var(--surface-2); }
   .cl-detail { grid-template-columns: 1fr; }
   .cl-toolbar .search.select { max-width: none; flex: 1; }
 }
+
+/* Días por bloque en el horario propio */
+.horario-bloque { margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px dashed var(--grid); }
+.horario-bloque .sched-block { margin-bottom: 5px; }
+.horario-dias { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.horario-dia { font: inherit; font-size: 0.7rem; font-weight: 650; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; padding: 0;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-secondary); }
+.horario-dia.on { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+.horario-dias__nota { font-size: 0.68rem; color: var(--text-muted); margin-left: 4px; }

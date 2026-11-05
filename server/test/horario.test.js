@@ -119,3 +119,31 @@ test('quitar una de la cola: solo la pendiente, queda cancelada con quién la qu
   assert.equal(await queue.quitar(2, 'yo@nebo'), null, 'una ya enviada no se toca');
   assert.equal(fake.tablas.llamada_cola.find((r) => r.id === 2).estado, 'enviada');
 });
+
+test('horario propio con días: solo esos días, aunque el general sea L–V', () => {
+  const MARTES_8 = [{ start: '08:00', end: '08:30', dias: [2] }];
+  assert.equal(schedule.abiertoPara(cfg, MARTES_8, hora('08:10', '2026-11-03')), true, 'martes 08:10');
+  assert.equal(schedule.abiertoPara(cfg, MARTES_8, hora('08:10', '2026-11-04')), false, 'miércoles no');
+  const SABADO = [{ start: '10:00', end: '11:00', dias: [6] }];
+  assert.equal(schedule.abiertoPara(cfg, SABADO, hora('10:15', '2026-11-07')), true, 'sábado: mandan sus días');
+  const MIXTO = [{ start: '10:00', end: '10:30', dias: [2, 4, 5] }, { start: '16:00', end: '16:30', dias: [4] }];
+  assert.equal(schedule.abiertoPara(cfg, MIXTO, hora('16:10', '2026-11-05')), true, 'jueves 16:10');
+  assert.equal(schedule.abiertoPara(cfg, MIXTO, hora('16:10', '2026-11-06')), false, 'viernes 16:10 no');
+  assert.equal(schedule.abiertoPara(cfg, MIXTO, hora('10:05', '2026-11-06')), true, 'viernes 10:05');
+  assert.equal(schedule.abiertoPara(cfg, [{ start: '08:00', end: '09:00' }], hora('08:30', '2026-11-07')), false, 'sin días: los del general');
+  assert.equal(schedule.abiertoPara({ ...cfg, enabled: false }, MARTES_8, hora('08:10', '2026-11-03')), false, 'interruptor general');
+});
+
+test('validar días: limpia, ordena, rechaza lo que no es lista y deja sin días si viene vacío', () => {
+  assert.deepEqual(schedule.validarHorarioCliente(cfg, [{ start: '10:00', end: '10:30', dias: [5, 2, 2, 9, '4'] }]), [{ start: '10:00', end: '10:30', dias: [2, 4, 5] }]);
+  assert.deepEqual(schedule.validarHorarioCliente(cfg, [{ start: '10:00', end: '10:30', dias: [] }]), [{ start: '10:00', end: '10:30' }]);
+  assert.throws(() => schedule.validarHorarioCliente(cfg, [{ start: '10:00', end: '10:30', dias: 'martes' }]), /lista/);
+});
+
+test('días hábiles y fecha del follow up con margen', () => {
+  assert.equal(schedule.sumarHabiles('2026-11-05', 1), '2026-11-06', 'jue + 1 = vie');
+  assert.equal(schedule.sumarHabiles('2026-11-06', 1), '2026-11-09', 'vie + 1 = lun');
+  assert.equal(schedule.sumarHabiles('2026-11-06', 0), '2026-11-06');
+  assert.equal(schedule.fechaFollowUp('2026-11-05', { followUpMargenDias: 1 }), '2026-11-06');
+  assert.equal(schedule.fechaFollowUp('2026-11-05', {}), '2026-11-05', 'sin margen: el mismo día');
+});

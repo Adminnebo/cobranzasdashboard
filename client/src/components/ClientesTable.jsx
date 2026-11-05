@@ -851,7 +851,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
 // Quién llama a este cliente ahora, bajo el interruptor del agente normal.
 function QuienLlama({ c }) {
   const e = {
-    promesa: { txt: '↩ Follow up activo', cls: 'fu', tip: `Lo llama el agente de follow up${c.estadoDetalle ? ' el ' + fechaCorta(c.estadoDetalle) : ''} si sigue debiendo. El agente normal está apagado mientras tanto.` },
+    promesa: { txt: '↩ Follow up activo', cls: 'fu', tip: `Prometió pagar${c.estadoDetalle ? ' el ' + fechaCorta(c.estadoDetalle) : ''}: si sigue debiendo, lo llama el agente de follow up (el día que diga Promesas, según el margen). El agente normal está apagado mientras tanto.` },
     dice_pago: { txt: '⏸ En pausa', cls: 'pausa', tip: 'Dijo que ya pagó: ningún agente lo llama hasta que el equipo lo vuelva a prender.' },
     escalar: { txt: '⏸ En pausa', cls: 'pausa', tip: 'Pasar a una persona: ningún agente lo llama hasta que alguien lo revise y lo vuelva a prender.' },
   }[c.estadoCobro];
