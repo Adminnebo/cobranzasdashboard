@@ -92,7 +92,7 @@ export default function CobrosView({ esAdmin }) {
               {data.primeraFoto
                 ? <> Fotos desde el {fechaCorta(data.primeraFoto)} · última: {hora(data.ultimaFoto && data.ultimaFoto.tomado_en)}.</>
                 : <> Todavía no hay fotos.</>}
-              {!data.erp && <> <b>El ERP no está configurado en este servidor</b> (faltan las variables MSSQL_*).</>}
+              {!data.erp && !data.ultimaFoto && <> <b>El ERP no está configurado en este servidor</b> (faltan las variables MSSQL_*).</>}
             </div>
           </div>
           {esAdmin && data.erp && (
