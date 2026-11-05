@@ -45,11 +45,12 @@ test('ciclo: promete hoy -> se apaga -> follow up en cola -> no contesta -> rein
   assert.ok(cola[0].fecha_prometida);
   assert.equal(t('promesa_pago')[0].estado, 'en_seguimiento');
 
-  // 3) El follow up no contesta -> reintento 1 (a las 2 h).
+  // 3) El follow up no contesta -> sigue en la ventana (reintento a las 2 h o mañana).
+  assert.ok(t('promesa_pago')[0].ventana_desde && t('promesa_pago')[0].ventana_hasta, 'guarda su ventana');
   cola[0].estado = 'enviada';
   r = await promesas.procesarLlamadas([llamada({ agente: 'seguimiento', intencion_pago: 'no_contesta', resultado: 'no_answer' })], clientes(), cfg);
-  assert.equal(r.reintento, 1);
-  assert.equal(t('promesa_pago')[0].reintentos, 1);
+  assert.equal(r.seguir, 1);
+  assert.equal(t('promesa_pago')[0].estado, 'en_seguimiento');
   assert.ok(t('promesa_pago')[0].proximo_intento_at);
 
   // Llega la hora del reintento -> vuelve a la cola.
@@ -75,13 +76,23 @@ test('ciclo: promete hoy -> se apaga -> follow up en cola -> no contesta -> rein
   assert.equal(config().enabled, false);
 });
 
-test('follow up sin fecha -> vuelve a la lista normal como estaba', async () => {
+test('follow up sin fecha: sigue en la ventana; en su último día vuelve a la lista normal como estaba', async () => {
   fake.reset();
   fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
   await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], clientes(), cfg);
   await promesas.revisarAbiertas(clientes(), cfg);
   t('llamada_cola').forEach((x) => { x.estado = 'enviada'; });
   await promesas.procesarLlamadas([llamada({ agente: 'seguimiento', intencion_pago: 'evasivo' })], clientes(), cfg);
+  assert.equal(t('promesa_pago')[0].estado, 'en_seguimiento', 'ventana de 7 días: sigue');
+
+  // Con una ventana de 1 día, hoy es el último: contesta sin fecha y vuelve a la lista normal.
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  const cfg1 = { ...cfg, fuVentanaDias: 1 };
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'pago_inmediato' })], clientes(), cfg1);
+  await promesas.revisarAbiertas(clientes(), cfg1);
+  t('llamada_cola').forEach((x) => { x.estado = 'enviada'; });
+  await promesas.procesarLlamadas([llamada({ agente: 'seguimiento', intencion_pago: 'evasivo' })], clientes(), cfg1);
   assert.equal(t('promesa_pago')[0].estado, 'incumplida');
   assert.equal(config().estado_cobro, null);
   assert.equal(config().enabled, true, 'vuelve a estar prendido');
@@ -264,4 +275,37 @@ test('estados: "dice que pagó" con vencido en 0 vuelve a la normalidad; "pasar 
   fake.tablas.cliente_config[0] = { phone: TEL, enabled: false, estado_cobro: 'dice_pago', enabled_antes: true };
   await promesas.limpiarEstados(new Map([[TEL, cliente]]));
   assert.equal(config().estado_cobro, 'dice_pago');
+});
+
+test('ventana: al acabarse sin fecha nueva cancela el follow up en cola y vuelve al agente principal', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: false, estado_cobro: 'promesa', enabled_antes: true }];
+  fake.tablas.promesa_pago = [{ id: 50, phone: TEL, estado: 'en_seguimiento', fecha_prometida: '2026-11-09', intento: 1,
+    ventana_desde: '2026-11-11', ventana_hasta: '2026-11-17', proximo_intento_at: '2026-11-18T04:00:00.000Z' }];
+  fake.tablas.llamada_cola = [{ id: 9, phone: TEL, agente: 'seguimiento', estado: 'pendiente', promesa_id: '50' }];
+  const r = await promesas.revisarAbiertas(new Map([[TEL, cliente]]), cfg, { ahora: new Date('2026-11-18T14:00:00Z') });
+  assert.equal(r.fin_ventana_incumplida, 1);
+  assert.equal(t('promesa_pago')[0].estado, 'incumplida');
+  assert.equal(t('llamada_cola')[0].estado, 'cancelada');
+  assert.equal(config().estado_cobro, null);
+  assert.equal(config().enabled, true, 'vuelve al agente principal como estaba');
+});
+
+test('ventana: una promesa a la que nunca se pudo llamar en su ventana se cierra como vieja', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: false, estado_cobro: 'promesa', enabled_antes: true }];
+  fake.tablas.promesa_pago = [{ id: 51, phone: TEL, estado: 'pendiente', fecha_prometida: '2026-11-02', intento: 1 }];
+  const r = await promesas.revisarAbiertas(new Map([[TEL, cliente]]), { ...cfg, followUpMargenDias: 1, fuVentanaDias: 7 }, { ahora: new Date('2026-11-12T14:00:00Z') });
+  assert.equal(r.viejas, 1);
+  assert.equal(t('llamada_cola').length, 0);
+});
+
+test('ventana: promesa que ya estaba en follow up sin ventana la empieza hoy', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: false, estado_cobro: 'promesa', enabled_antes: true }];
+  fake.tablas.promesa_pago = [{ id: 52, phone: TEL, estado: 'en_seguimiento', fecha_prometida: '2026-10-20', intento: 1, proximo_intento_at: '2026-11-12T04:00:00.000Z' }];
+  await promesas.revisarAbiertas(new Map([[TEL, cliente]]), { ...cfg, fuVentanaDias: 7 }, { ahora: new Date('2026-11-12T14:00:00Z') });
+  assert.equal(t('promesa_pago')[0].ventana_desde, '2026-11-12');
+  assert.equal(t('promesa_pago')[0].ventana_hasta, '2026-11-18');
+  assert.equal(t('promesa_pago')[0].estado, 'en_seguimiento');
 });

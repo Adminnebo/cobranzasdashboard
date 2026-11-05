@@ -693,3 +693,32 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .ficha-tag--retiro { border-color: color-mix(in srgb, var(--series-8) 50%, transparent); color: var(--series-8); }
 .horario-chip--ia { border-style: dashed; }
 .horario-ia-nota { font-size: 0.74rem; color: var(--text-secondary); background: var(--surface-2); border-radius: 8px; padding: 7px 9px; margin-top: -4px; }
+
+/* ══ Ajustes de llamadas (ventana con pestañas) ══ */
+.aj-modal { max-width: 720px; display: flex; flex-direction: column; max-height: calc(100vh - 64px); }
+.aj-tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); overflow-x: auto; }
+.aj-tabs button { font: inherit; font-size: 0.84rem; font-weight: 600; white-space: nowrap; padding: 8px 14px; border: 1px solid transparent; border-bottom: none; border-radius: 9px 9px 0 0; background: none; color: var(--text-muted); cursor: pointer; }
+.aj-tabs button.on { background: var(--surface-1); border-color: var(--border); color: var(--text-primary); margin-bottom: -1px; }
+.aj-body { padding: 14px 16px; overflow-y: auto; display: grid; gap: 16px; }
+.aj-body .sched-blocks { border-top: none; padding-top: 0; }
+.aj-grupo { display: grid; gap: 8px; }
+.aj-grupo h4 { margin: 0; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.aj-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 9px 12px; border: 1px solid var(--grid); border-radius: 10px; }
+.aj-fila__txt b { display: block; font-size: 0.86rem; font-weight: 600; color: var(--text-primary); }
+.aj-fila__txt small { display: block; font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; }
+.aj-fila__ctl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; font-size: 0.8rem; color: var(--text-secondary); }
+.aj-fila__ctl input[type="number"] { width: 56px; }
+.aj-fila__ctl input[type="number"], .aj-fila__ctl input[type="time"], .aj-fila__ctl select { font: inherit; font-size: 0.82rem; padding: 4px 6px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
+.aj-fila__ctl input[type="checkbox"] { width: 18px; height: 18px; }
+.aj-ejemplo { background: color-mix(in srgb, var(--series-1) 9%, transparent); border-radius: 10px; padding: 12px 14px; font-size: 0.84rem; display: grid; gap: 8px; }
+.aj-ejemplo b { color: var(--series-1); }
+.aj-ejemplo ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.aj-ejemplo li { display: flex; flex-direction: column; padding: 5px 9px; border-radius: 8px; background: var(--surface-1); border: 1px solid var(--grid); font-size: 0.76rem; }
+.aj-ejemplo li span { font-weight: 650; color: var(--text-primary); }
+.aj-ejemplo li em { font-style: normal; color: var(--text-muted); }
+.aj-ejemplo li.fin { border-color: var(--warning); }
+.aj-ejemplo li.fin em { color: var(--warning); font-weight: 600; }
+.aj-ejemplo__tot { font-size: 0.78rem; color: var(--text-secondary); }
+.aj-pie { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--border); }
+.aj-pie .sched-tz { margin-right: auto; }
+@media (max-width: 560px) { .aj-fila { grid-template-columns: 1fr; } .aj-fila__ctl { justify-content: flex-start; } }
