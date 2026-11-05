@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { fetchPromesasLista, marcarNoRetiro } from '../api';
+import { useMemo, useState } from 'react';
+import { marcarNoRetiro } from '../api';
 import { money, phoneFmt } from '../format';
 import { dia, ymdRD } from './PromesasView';
 
@@ -75,83 +75,62 @@ function Item({ nombre, prueba, monto, linea, cls, onClick, titulo, accion }) {
 // "log:123" → 123 (el id de la llamada en la tabla de llamadas).
 const idDeKey = (k) => (/^log:/.test(String(k || '')) ? String(k).slice(4) : null);
 
+/** Cuántos hay por atender (para el globito de la pestaña). */
+export function contarPorAtender(clientes, prom) {
+  const r = agruparRetiros(prom && prom.promesas);
+  return necesitanAlguien(clientes).length + r.hoy.length + r.manana.length + r.proximos.length;
+}
+
 /**
- * Pestaña flotante en el borde derecho, en todas las pestañas de Cobranzas.
- * Siempre arranca cerrada; brilla cuando hay alguien que necesita a una persona.
+ * Pestaña "Por atender": quién necesita a una persona y quién pidió que pasen a
+ * buscar el pago. Click en uno → ese cliente en Clientes y llamadas.
+ * @param prom      respuesta de /api/promesas/lista (la carga App, también para el globito)
+ * @param onCambio  recargar prom tras corregir un retiro
  */
-export default function AsistenciaFlotante({ clientes, verRetiros, onPick }) {
-  const [abierto, setAbierto] = useState(false);
-  const [vista, setVista] = useState('asistencia');
-  const [prom, setProm] = useState(null);
+export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambio }) {
   const [corrigiendo, setCorrigiendo] = useState(null);
   const [errRet, setErrRet] = useState(null);
-
-  const cargar = () => fetchPromesasLista().then(setProm).catch(() => {});
-  useEffect(() => {
-    if (!verRetiros) return undefined;
-    cargar();
-    const id = setInterval(cargar, 60000);
-    return () => clearInterval(id);
-  }, [verRetiros]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const noEsRetiro = async (p) => {
-    if (!window.confirm(`¿${p.nombre || phoneFmt(p.phone)} no pidió que pasen a buscar el pago?\n\nSale de la lista de retiros (la promesa sigue igual).`)) return;
-    setCorrigiendo(p.id); setErrRet(null);
-    try { await marcarNoRetiro(p.ficha.key); await cargar(); }
-    catch (e) { setErrRet(e.message); }
-    finally { setCorrigiendo(null); }
-  };
-
-  useEffect(() => {
-    if (!abierto) return undefined;
-    const esc = (e) => { if (e.key === 'Escape') setAbierto(false); };
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
-  }, [abierto]);
 
   const lista = useMemo(() => necesitanAlguien(clientes), [clientes]);
   const ret = useMemo(() => agruparRetiros(prom && prom.promesas), [prom]);
   const nRet = ret.hoy.length + ret.manana.length + ret.proximos.length;
-  const n = lista.length;
   const ir = (phone, llamada) => onPick(String(phone), llamada || null);
 
-  if (!abierto) {
-    return (
-      <button className={`asis-tab ${n ? 'asis-tab--alerta' : ''}`} onClick={() => setAbierto(true)}
-        title={n ? `${n} cliente(s) necesitan a una persona` : 'Nadie necesita a una persona ahora'}
-        aria-label={`Necesitan a alguien: ${n}`}>
-        <span className="asis-tab__ic">🙋</span>
-        <span className="asis-tab__n">{n}</span>
-        {verRetiros && nRet > 0 && <span className="asis-tab__ret" title={`${nRet} retiro(s)`}>🚚 {nRet}</span>}
-      </button>
-    );
-  }
+  const noEsRetiro = async (p) => {
+    if (!window.confirm(`¿${p.nombre || phoneFmt(p.phone)} no pidió que pasen a buscar el pago?\n\nSale de la lista de retiros (la promesa sigue igual).`)) return;
+    setCorrigiendo(p.id); setErrRet(null);
+    try { await marcarNoRetiro(p.ficha.key); if (onCambio) await onCambio(); }
+    catch (e) { setErrRet(e.message); }
+    finally { setCorrigiendo(null); }
+  };
 
   return (
-    <aside className="asis-panel" role="dialog" aria-label="Necesitan a alguien">
-      <div className="asis-panel__head">
-        <div className="asis-panel__tabs">
-          <button className={vista === 'asistencia' ? 'on' : ''} onClick={() => setVista('asistencia')}>🙋 Necesitan a alguien{n ? ` · ${n}` : ''}</button>
-          {verRetiros && <button className={vista === 'retiros' ? 'on' : ''} onClick={() => setVista('retiros')}>🚚 Retiros{nRet ? ` · ${nRet}` : ''}</button>}
+    <div className="aten-grid">
+      <section className="card aten-col">
+        <div className="aten-col__head">
+          <h3>🙋 Necesitan a una persona</h3>
+          <span className={`aten-n ${lista.length ? 'alerta' : ''}`}>{lista.length}</span>
         </div>
-        <button className="asis-panel__close" onClick={() => setAbierto(false)} title="Ocultar" aria-label="Ocultar">✕</button>
-      </div>
+        <div className="aten-col__body">
+          {!lista.length && <div className="asis-empty">Nadie necesita a una persona ahora.</div>}
+          {lista.map(({ c, motivo, desde }) => (
+            <Item key={c.phone} nombre={c.name || phoneFmt(c.phone)} prueba={c.prueba} monto={c.deuda_vencida} cls="alerta"
+              linea={`${motivo}${desde ? ` · desde ${fechaCorta(desde)}` : ''}`} onClick={() => ir(c.phone)} />
+          ))}
+        </div>
+        <div className="aten-col__foot">Ningún agente los llama. Salen de aquí cuando alguien los vuelve a prender en Clientes, o cuando ya no deben.</div>
+      </section>
 
-      <div className="asis-panel__body">
-        {vista === 'asistencia' && (
-          <>
-            {!n && <div className="asis-empty">Nadie necesita a una persona ahora.</div>}
-            {lista.map(({ c, motivo, desde }) => (
-              <Item key={c.phone} nombre={c.name || phoneFmt(c.phone)} prueba={c.prueba} monto={c.deuda_vencida} cls="alerta"
-                linea={`${motivo}${desde ? ` · desde ${fechaCorta(desde)}` : ''}`} onClick={() => ir(c.phone)} />
-            ))}
-          </>
-        )}
-        {vista === 'retiros' && (
-          <>
+      {verRetiros && (
+        <section className="card aten-col">
+          <div className="aten-col__head">
+            <h3>🚚 Retiros</h3>
+            <span className={`aten-n ${nRet ? 'hay' : ''}`}>{nRet}</span>
+          </div>
+          <div className="aten-col__body">
             {!prom && <div className="asis-empty">Cargando…</div>}
             {errRet && <div className="sched-err" style={{ padding: '8px 14px' }}>{errRet}</div>}
-            {prom && !nRet && <div className="asis-empty">Nadie pidió que pasen a retirar el pago. Aparecen aquí cuando el cliente lo dice en una llamada.</div>}
+            {prom && !nRet && <div className="asis-empty">Nadie pidió que pasen a retirar el pago. Aparecen aquí cuando el cliente lo pide en una llamada.</div>}
             {[['hoy', 'Hoy'], ['manana', 'Mañana'], ['proximos', 'Próximos']].map(([k, lbl]) => ret[k].length > 0 && (
               <div key={k}>
                 <div className="asis-sec">{lbl}</div>
@@ -169,15 +148,10 @@ export default function AsistenciaFlotante({ clientes, verRetiros, onPick }) {
                 ))}
               </div>
             ))}
-          </>
-        )}
-      </div>
-
-      <div className="asis-panel__foot">
-        {vista === 'asistencia'
-          ? 'Ningún agente los llama. Salen de aquí cuando alguien los vuelve a prender en Clientes.'
-          : 'Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro". Si ya no debe, sale solo.'}
-      </div>
-    </aside>
+          </div>
+          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro". Si ya no debe, sale solo.</div>
+        </section>
+      )}
+    </div>
   );
 }

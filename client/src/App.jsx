@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchData, fetchAnalysis, fetchHistory, fetchMe, fetchConfig } from './api';
+import { fetchData, fetchAnalysis, fetchHistory, fetchMe, fetchConfig, fetchPromesasLista } from './api';
 import { money, moneyShort, pct, num } from './format';
 import { intencionColor } from './constants';
 import KpiCard from './components/KpiCard';
@@ -17,7 +17,7 @@ import Login from './components/Login';
 import UsersAdmin from './components/UsersAdmin';
 import CorreoPanel from './components/CorreoPanel';
 import PagosModal from './components/PagosModal';
-import AsistenciaFlotante from './components/AsistenciaFlotante';
+import PorAtender, { contarPorAtender } from './components/PorAtender';
 import { useAuth } from './auth/AuthProvider';
 import { getAuthToken } from './auth/token';
 
@@ -52,7 +52,8 @@ export default function App() {
   // URL del botón "Conectar Gmail" (correo-servicio); null = la pestaña Correo no aparece.
   const [correoEmbed, setCorreoEmbed] = useState(null);
   const [pagosOpen, setPagosOpen] = useState(false);
-  const [foco, setFoco] = useState(null); // cliente a mostrar en Clientes (desde el panel flotante)
+  const [foco, setFoco] = useState(null); // cliente a mostrar en Clientes (desde Promesas o Por atender)
+  const [prom, setProm] = useState(null);  // promesas: retiros de "Por atender" y su globito
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
   const llamadasCountRef = useRef(null);
 
@@ -118,6 +119,16 @@ export default function App() {
     return () => { mounted = false; clearInterval(id); };
   }, [authed]);
 
+  // Promesas (retiros) para "Por atender": cada minuto, también para el globito de la pestaña.
+  const verRetiros = !!me && (me.isAdmin || !Array.isArray(me.permissions) || me.permissions.includes('cobranzas.promesas'));
+  const cargarProm = () => fetchPromesasLista().then(setProm).catch(() => {});
+  useEffect(() => {
+    if (!authed || !verRetiros) return undefined;
+    cargarProm();
+    const id = setInterval(cargarProm, 60000);
+    return () => clearInterval(id);
+  }, [authed, verRetiros]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const refreshAnalysis = () => {
     setAnalyzing(true);
     fetchAnalysis(true).then(setAnalysis).catch((e) => setError(e.message)).finally(() => setAnalyzing(false));
@@ -160,7 +171,7 @@ export default function App() {
   // Si la pestaña activa dejó de estar permitida, salta a la primera visible.
   useEffect(() => {
     if (!me) return;
-    const activaOk = tab === 'usuarios' ? me.isAdmin : tab === 'correo' ? verCorreo : puede((TABS.find((t) => t.id === tab) || {}).perm);
+    const activaOk = tab === 'usuarios' ? me.isAdmin : tab === 'correo' ? verCorreo : tab === 'atender' ? puede('cobranzas.clientes') : puede((TABS.find((t) => t.id === tab) || {}).perm);
     if (!activaOk && tabsVisibles[0]) setTab(tabsVisibles[0].id);
   }, [me]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -212,6 +223,7 @@ export default function App() {
   }
 
   const m = data.metrics;
+  const nAtender = contarPorAtender(data.clientes, verRetiros ? prom : null);
 
   return (
     <div className={`app ${tab === 'clientes' ? 'app--wide' : ''}`}>
@@ -291,6 +303,13 @@ export default function App() {
             <span className="tab-ic">✉️</span>Correo
           </button>
         )}
+        {puede('cobranzas.clientes') && (
+          <button className={`tab ${tab === 'atender' ? 'active' : ''}`} onClick={() => setTab('atender')}
+            title="Clientes que necesitan a una persona y retiros pedidos">
+            <span className="tab-ic">🙋</span>Por atender
+            {nAtender > 0 && <span className="tab-notif" aria-label={`${nAtender} por atender`}>{nAtender}</span>}
+          </button>
+        )}
       </nav>
 
       {tab === 'dashboard' && puede('cobranzas.cartera') && (
@@ -323,13 +342,13 @@ export default function App() {
 
       {tab === 'correo' && verCorreo && correoEmbed && <CorreoPanel embed={correoEmbed} />}
 
-      {pagosOpen && <PagosModal onClose={() => setPagosOpen(false)} />}
-
-      {/* Quién necesita a una persona: flotante en todas las pestañas, cerrado por defecto. */}
-      {puede('cobranzas.clientes') && (
-        <AsistenciaFlotante clientes={data.clientes} verRetiros={puede('cobranzas.promesas')}
+      {tab === 'atender' && puede('cobranzas.clientes') && (
+        <PorAtender clientes={data.clientes} prom={prom} verRetiros={verRetiros} onCambio={cargarProm}
           onPick={(phone, llamada) => { setTab('clientes'); setFoco({ phone, llamada, t: Date.now() }); }} />
       )}
+
+      {pagosOpen && <PagosModal onClose={() => setPagosOpen(false)} />}
+
 
     </div>
   );
