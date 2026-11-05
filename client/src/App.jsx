@@ -314,9 +314,6 @@ export default function App() {
 
       {pagosOpen && <PagosModal onClose={() => setPagosOpen(false)} />}
 
-      <div className="footer">
-        Prototipo · fuente: {data.source}. Conecta los webhooks de n8n en <code>server/.env</code> para datos en vivo.
-      </div>
     </div>
   );
 }
