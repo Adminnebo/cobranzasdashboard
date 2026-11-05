@@ -43,6 +43,23 @@ const VENTANA_DIAS = parseInt(process.env.PROMESA_VENTANA_DIAS || '3', 10);
 // como no contestado.
 const SIN_RESULTADO_HORAS = parseInt(process.env.PROMESA_SIN_RESULTADO_HORAS || '3', 10);
 const MAX_REINTENTOS = 2; // 1 el mismo día + 1 al día siguiente
+// Quien paga toda su deuda desaparece de la cartera. Antes de darlo por pagado
+// tiene que faltar este tiempo seguido, y la cartera tiene que haber llegado
+// completa (no menos de la mitad de la más grande vista): así una lectura a
+// medias de la fuente no cierra promesas de gente que sigue debiendo.
+const AUSENTE_MINUTOS = parseInt(process.env.AUSENTE_MINUTOS || '60', 10);
+const ausentes = new Map(); // phone -> desde cuándo falta (ms), en memoria
+let mayorCartera = 0;
+function carteraCompleta(n) {
+  mayorCartera = Math.max(mayorCartera, n);
+  return n > 0 && n >= mayorCartera * 0.5;
+}
+function ausenteConfirmado(phone, ahoraMs, carteraOk) {
+  if (!carteraOk) return false;
+  if (!ausentes.has(phone)) ausentes.set(phone, ahoraMs);
+  return ahoraMs - ausentes.get(phone) >= AUSENTE_MINUTOS * 60000;
+}
+const SIN_CARTERA = 'ya no está en la cartera (deuda total en 0)';
 
 const ABIERTAS = ['pendiente', 'en_seguimiento'];
 // Intenciones que nunca son promesa aunque traigan una fecha.
@@ -352,7 +369,7 @@ async function encolarFollowUp(p, cliente) {
   return true;
 }
 
-async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date() } = {}) {
+async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date(), carteraOk = true } = {}) {
   const hoy = ymdInTz(ahoraFecha);
   const corteViejas = sumarDias(hoy, -cfg.promesaMaxAtraso);
   const ahora = Date.now();
@@ -362,8 +379,18 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
 
   for (const [phone, p] of abiertas) {
     const c = clientesPorTel.get(phone);
-    if (!c) continue; // ya no está en la cartera
     try {
+      if (!c) {
+        // Pagó toda la deuda: desapareció de la cartera. Se cierra como cumplida.
+        if (ausenteConfirmado(phone, ahoraFecha.getTime(), carteraOk)) {
+          await cerrar(p, 'cumplida', SIN_CARTERA);
+          await clienteConfig.salirEstado(phone);
+          ausentes.delete(phone);
+          sumar('cumplidas_sin_cartera');
+        }
+        continue;
+      }
+      ausentes.delete(phone);
       const fecha = String(p.fecha_prometida).slice(0, 10);
       if ((c.deuda_vencida || 0) <= 0 && !c._forzar) {
         if (fecha <= hoy || p.estado === 'en_seguimiento') {
@@ -408,6 +435,42 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
   return cuenta;
 }
 
+/**
+ * Estados que quedan colgados sin promesa abierta:
+ *  - el cliente desapareció de la cartera (pagó todo): vuelve a la normalidad;
+ *  - "dice que pagó" y su vencido ya está en 0: era cierto, vuelve a la
+ *    normalidad (si más adelante vuelve a tener vencido, lo llama el agente principal).
+ * "Pasar a una persona" no se toca: lo decide una persona.
+ */
+async function limpiarEstados(clientesPorTel, { ahora: ahoraFecha = new Date(), carteraOk = true } = {}) {
+  const cuenta = {};
+  const estados = await clienteConfig.getEstadoMap();
+  if (!estados.size) return cuenta;
+  const abiertas = await abiertasPorTelefono();
+  for (const [phone, e] of estados) {
+    if (abiertas.has(phone)) continue; // la maneja revisarAbiertas
+    const c = clientesPorTel.get(phone);
+    try {
+      if (!c) {
+        if (ausenteConfirmado(phone, ahoraFecha.getTime(), carteraOk)) {
+          await clienteConfig.salirEstado(phone);
+          ausentes.delete(phone);
+          cuenta.estados_sin_cartera = (cuenta.estados_sin_cartera || 0) + 1;
+        }
+        continue;
+      }
+      ausentes.delete(phone);
+      if (e.estado === 'dice_pago' && (c.deuda_vencida || 0) <= 0 && !c._forzar) {
+        await clienteConfig.salirEstado(phone);
+        cuenta.dice_pago_confirmado = (cuenta.dice_pago_confirmado || 0) + 1;
+      }
+    } catch (err) {
+      console.error(`[promesas] limpiar estado de ${phone} falló:`, err.message);
+    }
+  }
+  return cuenta;
+}
+
 // ── Vuelta completa ──────────────────────────────────────────────────────────
 let corriendo = false;
 
@@ -435,7 +498,9 @@ async function correr({ fresco = false } = {}) {
     }
     const llamadas = [...(data.llamadas || []), ...(data.llamadasPrueba || [])];
     const r1 = await procesarLlamadas(llamadas, clientesPorTel, cfg);
-    const r2 = await revisarAbiertas(clientesPorTel, cfg);
+    const carteraOk = carteraCompleta((data.clientes || []).filter((c) => c.phone).length);
+    const r2 = await revisarAbiertas(clientesPorTel, cfg, { carteraOk });
+    Object.assign(r2, await limpiarEstados(clientesPorTel, { carteraOk }));
     // Ficha de cada llamada (retiro, hora pedida, horario que se repite). Aparte:
     // si la IA falla, las promesas siguen igual y la ficha se reintenta luego.
     try { await fichas.procesar(llamadas, cfg); }
@@ -510,6 +575,7 @@ async function resumen() {
 }
 
 module.exports = {
+  limpiarEstados,
   correr, resumen, lista, reabrir, cancelarPorCambioManual,
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,

@@ -21,6 +21,7 @@ const schedule = require('./schedule');
 const clienteConfig = require('./clienteConfig');
 const vapi = require('./vapi');
 const { getCachedData } = require('./cache');
+const pruebas = require('./pruebas');
 
 const TABLE = 'llamada_cola';
 const TZ = process.env.CRON_TZ || 'America/Santo_Domingo';
@@ -161,6 +162,25 @@ function algunaAbierta(cfg, horarios, d = new Date()) {
   return false;
 }
 
+/**
+ * ¿Se llama a este cliente ahora? Con la cartera de este momento, no la de
+ * cuando se encoló. Quien pagó toda su deuda desaparece de la cartera (no se
+ * ve ni se puede tocar): a ese no se le llama nunca.
+ * @returns {{ accion: 'llamar'|'esperar'|'cancelar', motivo?: string, vivo?: object }}
+ */
+function decidirAlMarcar(item, { clientes, pruebasSet, forzado }) {
+  // Sin cartera (la fuente falló o llegó vacía) no se sabe quién debe: no se marca.
+  if (!clientes || !clientes.length) return { accion: 'esperar', motivo: 'sin cartera cargada' };
+  const vivo = clientes.find((c) => String(c.phone) === String(item.phone));
+  if (!vivo) {
+    const esPrueba = pruebasSet && pruebasSet.has(pruebas.phoneKey(item.phone));
+    if (esPrueba) return { accion: 'llamar' };
+    return { accion: 'cancelar', motivo: 'ya no está en la cartera (deuda total en 0)' };
+  }
+  if ((vivo.deuda_vencida || 0) <= 0 && !forzado) return { accion: 'cancelar', motivo: 'sin vencido al marcar', vivo };
+  return { accion: 'llamar', vivo };
+}
+
 async function tick() {
   if (corriendo) return;                       // evita solapamiento
   if (!calls.callsEnabled) return;             // sin N8N_CALL_URL no hace nada
@@ -201,17 +221,22 @@ async function tick() {
     // Deuda al momento de marcar (no la de cuando se encoló): si ya no tiene
     // vencido, no se llama; si era un follow up, su promesa queda cumplida.
     const { clientes } = await getCachedData();
-    const vivo = (clientes || []).find((c) => String(c.phone) === String(item.phone));
     const forzado = agente === 'seguimiento' && (await clienteConfig.getForzadosSet()).has(String(item.phone));
-    if (vivo && (vivo.deuda_vencida || 0) <= 0 && !forzado) {
-      await db.update(TABLE, `?id=eq.${item.id}`, { estado: 'cancelada', detalle: 'sin vencido al marcar', enviada_at: new Date().toISOString() });
-      if (item.promesa_id) {
-        await db.update('promesa_pago', `?id=eq.${encodeURIComponent(item.promesa_id)}`, { estado: 'cumplida', cerrada_at: new Date().toISOString(), motivo_cierre: 'sin vencido al marcar' });
-        await clienteConfig.salirEstado(String(item.phone));
-      }
-      console.log(`[cola] ⏭  ${item.phone}: sin vencido, no se llama`);
+    const d = decidirAlMarcar(item, { clientes, pruebasSet: await pruebas.phones().catch(() => new Set()), forzado });
+    if (d.accion === 'esperar') {
+      console.warn(`[cola] ⏸  ${d.motivo}: no se marca hasta que vuelva la cartera`);
       return;
     }
+    if (d.accion === 'cancelar') {
+      await db.update(TABLE, `?id=eq.${item.id}`, { estado: 'cancelada', detalle: d.motivo, enviada_at: new Date().toISOString() });
+      if (item.promesa_id) {
+        await db.update('promesa_pago', `?id=eq.${encodeURIComponent(item.promesa_id)}`, { estado: 'cumplida', cerrada_at: new Date().toISOString(), motivo_cierre: d.motivo });
+        await clienteConfig.salirEstado(String(item.phone));
+      }
+      console.log(`[cola] ⏭  ${item.phone}: ${d.motivo}, no se llama`);
+      return;
+    }
+    const vivo = d.vivo;
 
     const cliente = {
       phone: item.phone,
@@ -333,4 +358,4 @@ async function cancelarTodo() {
   return { canceladas: n };
 }
 
-module.exports = { enqueue, tick, status, lista, quitar, cancelarTodo, autoEnqueueEnabled, ordenCola, elegirSiguiente, algunaAbierta, TZ };
+module.exports = { enqueue, tick, decidirAlMarcar, status, lista, quitar, cancelarTodo, autoEnqueueEnabled, ordenCola, elegirSiguiente, algunaAbierta, TZ };

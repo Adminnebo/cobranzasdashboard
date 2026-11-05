@@ -211,3 +211,57 @@ test('margen: "pago mañana" no llama el día prometido sino el día hábil sigu
   r = await promesas.revisarAbiertas(clientes(), { ...cfg, followUpMargenDias: 0 });
   assert.equal(r.follow_ups_encolados, 1, 'sin margen sale el mismo día');
 });
+
+test('cola: a quien desapareció de la cartera (pagó todo) no se le llama; sin cartera no se marca', () => {
+  const item = { id: 1, phone: TEL, deuda_vencida: 8000 };
+  const pruebasSet = new Set(['3395658425']);
+  assert.equal(queue.decidirAlMarcar(item, { clientes: [cliente], pruebasSet }).accion, 'llamar');
+  const fuera = queue.decidirAlMarcar(item, { clientes: [{ ...cliente, phone: '8090000000' }], pruebasSet });
+  assert.equal(fuera.accion, 'cancelar');
+  assert.match(fuera.motivo, /ya no está en la cartera/);
+  assert.equal(queue.decidirAlMarcar({ id: 2, phone: '3395658425' }, { clientes: [cliente], pruebasSet }).accion, 'llamar', 'número de prueba');
+  assert.equal(queue.decidirAlMarcar(item, { clientes: [{ ...cliente, deuda_vencida: 0 }], pruebasSet }).accion, 'cancelar');
+  assert.equal(queue.decidirAlMarcar(item, { clientes: [{ ...cliente, deuda_vencida: 0 }], pruebasSet, forzado: true }).accion, 'llamar');
+  assert.equal(queue.decidirAlMarcar(item, { clientes: [], pruebasSet }).accion, 'esperar');
+});
+
+test('motor: si el cliente desaparece de la cartera, a la hora su promesa queda cumplida', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  await promesas.procesarLlamadas([llamada({ agente: 'cobranzas', intencion_pago: 'fecha_especifica', fecha_pago: '' })], clientes(), cfg);
+  // Promesa abierta a mano (sin IA para la fecha).
+  fake.tablas.promesa_pago = [{ id: 77, phone: TEL, estado: 'pendiente', fecha_prometida: '2026-11-20', intento: 1 }];
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: false, estado_cobro: 'promesa', enabled_antes: true }];
+  const vacia = new Map();
+  const t0 = new Date('2026-11-10T14:00:00Z');
+  await promesas.revisarAbiertas(vacia, cfg, { ahora: t0, carteraOk: false });
+  await promesas.revisarAbiertas(vacia, cfg, { ahora: new Date(t0.getTime() + 3 * 3600000), carteraOk: false });
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente', 'cartera incompleta: no se toca');
+  await promesas.revisarAbiertas(vacia, cfg, { ahora: t0 });
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente', 'recién falta: espera');
+  const r = await promesas.revisarAbiertas(vacia, cfg, { ahora: new Date(t0.getTime() + 61 * 60000) });
+  assert.equal(r.cumplidas_sin_cartera, 1);
+  assert.equal(t('promesa_pago')[0].estado, 'cumplida');
+  assert.match(t('promesa_pago')[0].motivo_cierre, /deuda total en 0/);
+  assert.equal(config().estado_cobro, null);
+  assert.equal(config().enabled, true, 'vuelve como estaba');
+});
+
+test('estados: "dice que pagó" con vencido en 0 vuelve a la normalidad; "pasar a una persona" no se toca', async () => {
+  fake.reset();
+  fake.tablas.promesa_pago = [];
+  fake.tablas.cliente_config = [
+    { phone: TEL, enabled: false, estado_cobro: 'dice_pago', enabled_antes: true },
+    { phone: '8095550002', enabled: false, estado_cobro: 'escalar', enabled_antes: true },
+  ];
+  const mapa = new Map([[TEL, { ...cliente, deuda_vencida: 0 }], ['8095550002', { ...cliente, phone: '8095550002', deuda_vencida: 0 }]]);
+  const r = await promesas.limpiarEstados(mapa);
+  assert.equal(r.dice_pago_confirmado, 1);
+  assert.equal(config().estado_cobro, null);
+  assert.equal(config().enabled, true);
+  assert.equal(t('cliente_config').find((x) => x.phone === '8095550002').estado_cobro, 'escalar');
+  // Con vencido sigue en pausa.
+  fake.tablas.cliente_config[0] = { phone: TEL, enabled: false, estado_cobro: 'dice_pago', enabled_antes: true };
+  await promesas.limpiarEstados(new Map([[TEL, cliente]]));
+  assert.equal(config().estado_cobro, 'dice_pago');
+});
