@@ -307,7 +307,11 @@ export default function App() {
         </div>
       )}
 
-      {tab === 'promesas' && puede('cobranzas.promesas') && <PromesasView />}
+      {tab === 'promesas' && puede('cobranzas.promesas') && (
+        <PromesasView onVerCliente={puede('cobranzas.clientes')
+          ? (phone, llamada) => { setTab('clientes'); setFoco({ phone, llamada, t: Date.now() }); }
+          : null} />
+      )}
 
       {tab === 'asistente' && puede('cobranzas.asistente') && <AssistantView />}
 

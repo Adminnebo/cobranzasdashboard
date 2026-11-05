@@ -336,7 +336,8 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
     if (page !== pager.page) { pager.setPage(page); return; }
     const el = document.getElementById(`cl-${irA}`);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Si viene con una llamada (desde Promesas), centra esa llamada ya desplegada.
+      (document.getElementById('cc-foco') || el).scrollIntoView({ behavior: 'smooth', block: 'center' });
       setResaltado(irA);
       setTimeout(() => setResaltado(null), 1800);
     }
@@ -726,7 +727,8 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                 {abierta && (
                   <tr className="call-detail-row">
                     <td colSpan={11}>
-                      <ClientCalls calls={clientCalls} />
+                      <ClientCalls calls={clientCalls}
+                        abrir={foco && foco.llamada && String(foco.phone) === String(c.phone) ? foco.llamada : null} />
                     </td>
                   </tr>
                 )}

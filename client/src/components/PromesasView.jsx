@@ -70,7 +70,7 @@ export function FichaLineas({ ficha, fechaPrometida }) {
 }
 
 /** Pestaña Promesas: cada promesa de pago, su estado y qué sigue. */
-export default function PromesasView() {
+export default function PromesasView({ onVerCliente = null }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [verTodas, setVerTodas] = useState(false);
@@ -172,9 +172,14 @@ export default function PromesasView() {
             {filtradas.map((p) => {
               const e = estadoDe(p.estado);
               return (
-                <tr key={p.id}>
+                <tr key={p.id} className={onVerCliente ? 'row-clickable' : ''}
+                  title={onVerCliente ? 'Ver este cliente y la llamada en Clientes y llamadas' : undefined}
+                  onClick={(ev) => {
+                    if (!onVerCliente || ev.target.closest('button, a, input')) return;
+                    onVerCliente(String(p.phone), { id: p.llamadaId, at: p.prometidaEl });
+                  }}>
                   <td>
-                    <div style={{ fontWeight: 600 }}>
+                    <div style={{ fontWeight: 600 }} className={onVerCliente ? 'prom-cliente-link' : ''}>
                       {p.nombre || p.phone}
                       {p.prueba && <span className="tag-prueba" title="Número de prueba: solo lo ven los super admins">Prueba</span>}
                     </div>
