@@ -30,17 +30,9 @@ export const momento = (iso) => {
 
 /** Qué sigue con una promesa abierta, en palabras. */
 export const ymdRD = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santo_Domingo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-const horaRD = (d) => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Santo_Domingo', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 
-export function siguiente(p, pagoHoyHora) {
+export function siguiente(p) {
   if (p.estado === 'pendiente') {
-    // "Pago hoy": prometió hoy para hoy -> follow up a la hora de la tarde (o mañana si prometió después).
-    const hoy = ymdRD(new Date());
-    if (pagoHoyHora && p.prometidaEl && ymdRD(new Date(p.prometidaEl)) === hoy && String(p.fechaPrometida).slice(0, 10) === hoy) {
-      return horaRD(new Date(p.prometidaEl)) >= pagoHoyHora
-        ? `Prometió pagar hoy después de las ${pagoHoyHora}: follow up mañana si sigue debiendo`
-        : `Prometió pagar hoy: follow up hoy a las ${pagoHoyHora} si sigue debiendo`;
-    }
     return `Follow up el ${dia(p.followUpFecha || p.fechaPrometida)} si sigue debiendo`;
   }
   if (p.estado === 'en_seguimiento') {
@@ -48,6 +40,33 @@ export function siguiente(p, pagoHoyHora) {
     return `Llamada de follow up en cola o en curso (desde ${momento(p.seguimientoAt)})`;
   }
   return p.motivoCierre || '';
+}
+
+/** Lo que dijo el cliente sobre cómo y cuándo (lo lee la IA de la llamada). */
+export function FichaLineas({ ficha, fechaPrometida }) {
+  if (!ficha) return null;
+  const r = ficha.retiro || {};
+  const l = ficha.llamar;
+  const d = ficha.disponibilidad;
+  return (
+    <div className="ficha-lineas">
+      {ficha.modalidad === 'retiro' && (
+        <span className="ficha-tag ficha-tag--retiro" title={r.texto ? `Dijo: "${r.texto}"` : 'Pidió que pasen a retirar el pago'}>
+          🚚 Retiro {dia(r.fecha || fechaPrometida)}{r.desde ? ` · ${r.desde}–${r.hasta}` : ''}
+        </span>
+      )}
+      {l && (
+        <span className="ficha-tag" title={l.texto ? `Dijo: "${l.texto}"` : 'Pidió que lo llamen a esta hora'}>
+          📞 Pidió llamada {l.fecha ? `${dia(l.fecha)} ` : ''}a las {l.hora}
+        </span>
+      )}
+      {d && d.bloques && (
+        <span className="ficha-tag" title={d.texto ? `Dijo: "${d.texto}"` : 'Horario que dio el cliente'}>
+          🕘 Disponible {d.bloques.map((b) => `${b.start}–${b.end}`).join(', ')}
+        </span>
+      )}
+    </div>
+  );
 }
 
 /** Pestaña Promesas: cada promesa de pago, su estado y qué sigue. */
@@ -179,7 +198,8 @@ export default function PromesasView() {
                   <td>{p.intento}.ª{p.intento >= data.tope ? ' (última)' : ''}</td>
                   <td className="num">{p.vencidoHoy == null ? '—' : money(p.vencidoHoy)}</td>
                   <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                    {siguiente(p, data.pagoHoyHora)}
+                    {siguiente(p)}
+                    <FichaLineas ficha={p.ficha} fechaPrometida={p.fechaPrometida} />
                     {data.superAdmin && !e.abierta && (
                       <div style={{ marginTop: 4 }}>
                         <button className="mini-btn" disabled={reabriendo === p.id} onClick={() => reabrir(p)}

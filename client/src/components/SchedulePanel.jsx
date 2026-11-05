@@ -11,10 +11,10 @@ export default function SchedulePanel({ onSaved }) {
   const ref = useRef(null);
 
   const rangoInicial = useRef(null);
-  const pagoHoyInicial = useRef(null);
   const margenInicial = useRef(null);
+  const extrasInicial = useRef(null);
   useEffect(() => {
-    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; pagoHoyInicial.current = c.pagoHoyHora; margenInicial.current = c.followUpMargenDias; setCfg(c); }).catch(() => {});
+    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; margenInicial.current = c.followUpMargenDias; extrasInicial.current = JSON.stringify([c.retiroManana, c.retiroTarde, c.horarioAuto]); setCfg(c); }).catch(() => {});
   }, []);
   // Los agentes se cargan al abrir el panel (no en cada render de la app).
   useEffect(() => {
@@ -51,10 +51,16 @@ export default function SchedulePanel({ onSaved }) {
     const rango = `${cfg.horarioClienteDesde}-${cfg.horarioClienteHasta}` !== rangoInicial.current
       ? { horarioClienteDesde: cfg.horarioClienteDesde, horarioClienteHasta: cfg.horarioClienteHasta }
       : {};
-    // Igual la hora de "pago hoy" (sql/005).
-    if (cfg.pagoHoyHora && cfg.pagoHoyHora !== pagoHoyInicial.current) rango.pagoHoyHora = cfg.pagoHoyHora;
     // Y el margen del follow up (sql/007).
     if (cfg.followUpMargenDias != null && Number(cfg.followUpMargenDias) !== Number(margenInicial.current)) rango.followUpMargenDias = Number(cfg.followUpMargenDias);
+    // Retiros y horario automático (sql/008): solo si cambiaron.
+    if (JSON.stringify([cfg.retiroManana, cfg.retiroTarde, cfg.horarioAuto]) !== extrasInicial.current) {
+      for (const [k, f] of [['retiroManana', cfg.retiroManana], ['retiroTarde', cfg.retiroTarde]]) {
+        if (f && f.hasta <= f.desde) { setErr('Las horas de los retiros tienen que terminar después de empezar.'); return; }
+        rango[k] = f;
+      }
+      rango.horarioAuto = cfg.horarioAuto !== false;
+    }
     setSaving(true);
     try {
       const saved = await saveSchedule({
@@ -64,8 +70,8 @@ export default function SchedulePanel({ onSaved }) {
         promesaTope: Number(cfg.promesaTope), promesaMaxAtraso: Number(cfg.promesaMaxAtraso), reintentoHoras: Number(cfg.reintentoHoras),
       });
       rangoInicial.current = `${saved.horarioClienteDesde}-${saved.horarioClienteHasta}`;
-      pagoHoyInicial.current = saved.pagoHoyHora;
       margenInicial.current = saved.followUpMargenDias;
+      extrasInicial.current = JSON.stringify([saved.retiroManana, saved.retiroTarde, saved.horarioAuto]);
       setCfg(saved);
       setOpen(false);
       if (onSaved) onSaved();
@@ -124,17 +130,33 @@ export default function SchedulePanel({ onSaved }) {
               <input type="number" min="0" max="60" value={cfg.promesaMaxAtraso ?? 7} onChange={(e) => set({ promesaMaxAtraso: e.target.value })} />
             </label>
             <label className="sched-num">
-              <span>Días hábiles después de la fecha prometida para el follow up (con 1: "pago mañana" el jueves → llama el viernes)</span>
-              <input type="number" min="0" max="5" value={cfg.followUpMargenDias ?? 1} onChange={(e) => set({ followUpMargenDias: e.target.value })} />
-            </label>
-            <label className="sched-num">
-              <span>Si promete pagar "hoy", el follow up sale ese día a las (si promete después, al día siguiente)</span>
-              <input type="time" style={{ width: 'auto' }} value={cfg.pagoHoyHora || '17:00'} onChange={(e) => set({ pagoHoyHora: e.target.value })} />
+              <span>Días hábiles después de la fecha prometida para llamar (con 1: si promete el jueves, lo llama el viernes; "pago hoy" → mañana)</span>
+              <input type="number" min="1" max="5" value={cfg.followUpMargenDias ?? 1} onChange={(e) => set({ followUpMargenDias: e.target.value })} />
             </label>
             <label className="sched-num">
               <span>Horas para reintentar si no contesta (2.º intento al día siguiente)</span>
               <input type="number" min="1" max="8" value={cfg.reintentoHoras ?? 2} onChange={(e) => set({ reintentoHoras: e.target.value })} />
             </label>
+          </div>
+
+          <div className="sched-blocks">
+            <div className="sched-lbl">Lo que dice el cliente</div>
+            <label className="sched-check" style={{ marginBottom: 8 }}>
+              <input type="checkbox" checked={cfg.horarioAuto !== false} onChange={(e) => set({ horarioAuto: e.target.checked })} />
+              Ajustar solo el horario propio cuando el cliente da uno ("solo puedo los martes a las 10"). Nunca cambia uno puesto a mano.
+            </label>
+            <div className="sched-tz" style={{ marginBottom: 6 }}>Retiros: horas de "en la mañana" y "en la tarde"</div>
+            {[['retiroManana', 'Mañana', { desde: '08:00', hasta: '12:00' }], ['retiroTarde', 'Tarde', { desde: '14:00', hasta: '18:00' }]].map(([k, lbl, def]) => {
+              const f = cfg[k] || def;
+              return (
+                <div className="sched-block" key={k}>
+                  <span style={{ width: 52 }}>{lbl}</span>
+                  <input type="time" value={f.desde} onChange={(e) => set({ [k]: { ...f, desde: e.target.value } })} />
+                  <span>a</span>
+                  <input type="time" value={f.hasta} onChange={(e) => set({ [k]: { ...f, hasta: e.target.value } })} />
+                </div>
+              );
+            })}
           </div>
 
           {/* Rango dentro del cual puede caer el horario propio de un cliente. */}

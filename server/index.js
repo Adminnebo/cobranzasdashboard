@@ -22,6 +22,7 @@ const queue = require('./services/queue');
 const schedule = require('./services/schedule');
 const agents = require('./services/agents');
 const promesas = require('./services/promesas');
+const fichas = require('./services/fichas');
 const history = require('./services/history');
 
 const app = express();
@@ -134,7 +135,8 @@ app.get('/api/data', async (req, res) => {
     // Estado de cobro (promesa / dice que pagó / pasar a una persona). Si las
     // columnas aún no existen (sql/003 sin correr), se sigue sin estados.
     try { estadoMap = await clienteConfig.getEstadoMap(); } catch (e) { /* sin estados */ }
-    const horarioMap = await clienteConfig.getHorarioMap();
+    const horarioInfo = await clienteConfig.getHorarioInfoMap();
+    const horarioMap = new Map([...horarioInfo].map(([k, v]) => [k, v.horario]));
     const forzados = superAdmin ? await clienteConfig.getForzadosSet() : new Set();
     // Última llamada de cada cliente (para mostrar su status en la tabla).
     const ultimaPorTel = new Map();
@@ -159,6 +161,8 @@ app.get('/api/data', async (req, res) => {
         estadoDetalle: (estadoMap.get(c.phone) || {}).detalle || null,
         estadoAt: (estadoMap.get(c.phone) || {}).at || null,
         horario: horarioMap.get(c.phone) || null,
+        horarioOrigen: (horarioInfo.get(c.phone) || {}).origen || null,
+        horarioDetalle: (horarioInfo.get(c.phone) || {}).detalle || null,
         forzarFollowUp: forzados.has(c.phone),
         ultimaLlamada: ll
           ? {
@@ -188,6 +192,8 @@ app.get('/api/data', async (req, res) => {
           ...c, prueba: true, enabled: enabledMap.get(c.phone) === true, ivr: false,
           estadoCobro: est.estado || null, estadoDetalle: est.detalle || null, estadoAt: est.at || null,
           horario: horarioMap.get(c.phone) || null,
+          horarioOrigen: (horarioInfo.get(c.phone) || {}).origen || null,
+          horarioDetalle: (horarioInfo.get(c.phone) || {}).detalle || null,
           ultimaLlamada: ll
             ? { fecha: ll.created_at, intencion: ll.intencion_pago, fechaPago: ll.fecha_pago || null, notas: ll.notas || null,
                 transcripcion: ll.transcripcion || null, grabacion: ll.grabacion || null, agente: ll.agente, resultado: ll.resultado || null }
@@ -240,7 +246,7 @@ app.put('/api/clientes/horario', requirePermission('cobranzas.cliente_toggle'), 
     if (!Array.isArray(phones) || !phones.length) return res.status(400).json({ error: 'Falta phones[]' });
     const cfg = await schedule.get(true);
     const limpio = schedule.validarHorarioCliente(cfg, horario);
-    res.json(await clienteConfig.setHorario(phones, limpio, req.user ? req.user.email : null));
+    res.json(await clienteConfig.setHorario(phones, limpio, req.user ? req.user.email : null, { origen: 'manual' }));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
   }
@@ -434,7 +440,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
       patch.agentName = b.agentName || null;
     }
     // Ajustes del follow up: solo si vienen.
-    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'pagoHoyHora', 'followUpMargenDias']) if (k in b) patch[k] = b[k];
+    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'followUpMargenDias', 'retiroManana', 'retiroTarde', 'horarioAuto']) if (k in b) patch[k] = b[k];
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {
@@ -482,9 +488,22 @@ app.get('/api/promesas', requirePermission('cobranzas.promesas'), async (req, re
 // Las de números de prueba solo las ven los super admins (marcadas "prueba").
 app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (req, res) => {
   try {
-    const [rows, { clientes }, setPruebas, superAdmin, cfg] = await Promise.all([
-      promesas.lista(), getCachedData(), pruebas.phones(), esSuperAdmin(req), schedule.get(),
+    const [rows, { clientes }, setPruebas, superAdmin, cfg, fichasMap] = await Promise.all([
+      promesas.lista(), getCachedData(), pruebas.phones(), esSuperAdmin(req), schedule.get(), fichas.mapaReciente(),
     ]);
+    // Ficha de la llamada que dejó cada promesa (retiro, hora pedida). Si un
+    // follow up reprogramó sin repetir cómo paga, vale lo dicho en la anterior.
+    const porId = new Map(rows.map((r) => [String(r.id), r]));
+    const fichaDe = (r) => {
+      let x = r; let f = null; let saltos = 0;
+      while (x && saltos++ < 5) {
+        const fx = x.llamada_key ? fichasMap.get(x.llamada_key) : null;
+        if (fx && !f) f = { llamar: fx.llamar || null, disponibilidad: fx.disponibilidad || null };
+        if (fx && fx.modalidad) return { ...f, modalidad: fx.modalidad, retiro: fx.retiro || null };
+        x = x.promesa_anterior_id ? porId.get(String(x.promesa_anterior_id)) : null;
+      }
+      return f;
+    };
     const porTel = new Map((clientes || []).map((c) => [String(c.phone), c]));
     // Los números de prueba con su nombre y su vencido ficticio (solo super admins).
     if (superAdmin) for (const f of await pruebas.clientesFicticios(clientes || []).catch(() => [])) porTel.set(f.phone, f);
@@ -501,6 +520,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         estado: r.estado, intento: r.intento || 1, reintentos: r.reintentos || 0,
         fechaPrometida: r.fecha_prometida, textoOriginal: r.texto_original,
         followUpFecha: r.fecha_prometida ? schedule.fechaFollowUp(r.fecha_prometida, cfg) : null,
+        ficha: fichaDe(r),
         prometidaEl: r.fecha_llamada, montoAlPrometer: r.monto_al_prometer,
         agente: r.agente, origen: r.origen,
         proximoIntento: r.proximo_intento_at, seguimientoAt: r.seguimiento_at,
@@ -508,7 +528,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         anteriorId: r.promesa_anterior_id, createdAt: r.created_at,
       });
     }
-    res.json({ promesas: out, tope: cfg.promesaTope, pagoHoyHora: cfg.pagoHoyHora, followUpMargenDias: cfg.followUpMargenDias, superAdmin });
+    res.json({ promesas: out, tope: cfg.promesaTope, followUpMargenDias: cfg.followUpMargenDias, retiroManana: cfg.retiroManana, retiroTarde: cfg.retiroTarde, superAdmin });
   } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
 });
 

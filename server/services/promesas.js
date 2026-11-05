@@ -28,6 +28,7 @@ const queue = require('./queue');
 const schedule = require('./schedule');
 const clienteConfig = require('./clienteConfig');
 const pruebas = require('./pruebas');
+const fichas = require('./fichas');
 const { getCachedData } = require('./cache');
 
 const TABLE = 'promesa_pago';
@@ -50,24 +51,6 @@ const NO_PROMESA = new Set(['ya_pago', 'no_contesta', 'sin_intencion', 'disputa'
 const ymdInTz = (d = new Date()) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const sumarDias = (ymd, n) => new Date(new Date(ymd + 'T12:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10);
-
-const minsDe = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
-
-/**
- * "Pago hoy": la promesa se hizo hoy para hoy. El follow up no sale minutos
- * después de colgar sino a la hora de la tarde de Ajustes (pagoHoyHora, 17:00).
- * Si prometió después de esa hora, espera al día siguiente.
- * Sin pagoHoyHora (solo en pruebas) no espera.
- * @returns {boolean} true si todavía no toca encolar el follow up
- */
-function pagoHoyEspera(fechaLlamada, hoy, cfg, ahora = new Date()) {
-  if (!fechaLlamada || !cfg || !cfg.pagoHoyHora) return false;
-  const d = new Date(fechaLlamada);
-  if (ymdInTz(d) !== hoy) return false;                    // prometió otro día
-  const hora = minsDe(cfg.pagoHoyHora);
-  if (schedule.partsInTz(d).mins >= hora) return true;    // prometió tarde: mañana
-  return schedule.partsInTz(ahora).mins < hora;            // aún no es la hora
-}
 
 /** Medianoche (inicio) de un día YYYY-MM-DD en la zona del panel, como Date. */
 function inicioDelDia(ymd) {
@@ -391,13 +374,9 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
       }
       if (p.estado === 'pendiente') {
         if (fecha > hoy) continue;
-        // Prometió hoy para hoy ("pago hoy"): el follow up sale a la hora de la
-        // tarde configurada, no minutos después de colgar (también los de prueba).
-        const esPagoHoy = p.fecha_llamada && ymdInTz(new Date(p.fecha_llamada)) === fecha;
-        if (esPagoHoy && pagoHoyEspera(p.fecha_llamada, hoy, cfg, ahoraFecha)) continue;
-        // El resto: el follow up sale N días hábiles después de la fecha prometida
-        // (margen configurable, para que el pago alcance a reflejarse).
-        if (!esPagoHoy && schedule.fechaFollowUp(fecha, cfg) > hoy) continue;
+        // El follow up sale N días hábiles después de la fecha prometida (margen
+        // de Ajustes, mínimo 1): "pago hoy" → el siguiente día hábil.
+        if (schedule.fechaFollowUp(fecha, cfg) > hoy) continue;
         if (fecha < corteViejas) {
           await cerrar(p, 'vieja', `más de ${cfg.promesaMaxAtraso} días de atraso`);
           await clienteConfig.salirEstado(phone);
@@ -456,6 +435,10 @@ async function correr({ fresco = false } = {}) {
     const llamadas = [...(data.llamadas || []), ...(data.llamadasPrueba || [])];
     const r1 = await procesarLlamadas(llamadas, clientesPorTel, cfg);
     const r2 = await revisarAbiertas(clientesPorTel, cfg);
+    // Ficha de cada llamada (retiro, hora pedida, horario que se repite). Aparte:
+    // si la IA falla, las promesas siguen igual y la ficha se reintenta luego.
+    try { await fichas.procesar(llamadas, cfg); }
+    catch (err) { console.error('[fichas] falló:', err.message); }
     const out = { llamadas: r1, promesas: r2 };
     if (r1.nuevas || Object.keys(r2).length) console.log('[promesas]', JSON.stringify(out));
     return out;
@@ -527,5 +510,5 @@ module.exports = {
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,
   // puras (pruebas)
-  decidir, fechaDeLlamada, proximoReintento, inicioDelDia, llamadaKey, pagoHoyEspera, MAX_REINTENTOS,
+  decidir, fechaDeLlamada, proximoReintento, inicioDelDia, llamadaKey, MAX_REINTENTOS,
 };

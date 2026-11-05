@@ -117,8 +117,29 @@ async function getHorarioMap() {
   return map;
 }
 
-/** Guarda (o borra, con null) el horario propio de uno o varios clientes. */
-async function setHorario(phones, horario, updatedBy) {
+/**
+ * Horario propio con su origen: Map<phone, { horario, origen: 'manual'|'ia'|null, detalle }>.
+ * Sin sql/008 (columnas de origen) devuelve el horario con origen null (= a mano).
+ */
+async function getHorarioInfoMap() {
+  let rows;
+  try { rows = await db.select(TABLE, '?select=phone,horario,horario_origen,horario_detalle&horario=not.is.null'); }
+  catch (e) {
+    const solo = await getHorarioMap();
+    return new Map([...solo].map(([p, h]) => [p, { horario: h, origen: null, detalle: null }]));
+  }
+  const map = new Map();
+  for (const r of rows || []) {
+    if (Array.isArray(r.horario) && r.horario.length) map.set(String(r.phone), { horario: r.horario, origen: r.horario_origen || null, detalle: r.horario_detalle || null });
+  }
+  return map;
+}
+
+/**
+ * Guarda (o borra, con null) el horario propio de uno o varios clientes.
+ * opts.origen: 'manual' (lo puso una persona) | 'ia' (lo dijo el cliente en una llamada).
+ */
+async function setHorario(phones, horario, updatedBy, opts = {}) {
   const list = (Array.isArray(phones) ? phones : [phones]).map(String).filter(Boolean);
   if (!list.length) return { updated: 0 };
   const valor = horario && horario.length ? horario : null;
@@ -126,10 +147,19 @@ async function setHorario(phones, horario, updatedBy) {
   // A los que ya tienen fila solo se les toca el horario (no enabled ni el
   // estado de cobro); los que no tienen fila se crean apagados, como siempre.
   const existentes = new Set(((await db.select(TABLE, `?select=phone&phone=in.(${list.map(encodeURIComponent).join(',')})`)) || []).map((r) => String(r.phone)));
-  const conFila = list.filter((p) => existentes.has(p)).map((phone) => ({ phone, horario: valor, updated_at: at, updated_by: updatedBy || null }));
-  const sinFila = list.filter((p) => !existentes.has(p)).map((phone) => ({ phone, enabled: false, horario: valor, updated_at: at, updated_by: updatedBy || null }));
-  if (conFila.length) await db.upsert(TABLE, conFila, 'phone');
-  if (sinFila.length) await db.upsert(TABLE, sinFila, 'phone');
+  const origen = valor ? { horario_origen: opts.origen || 'manual', horario_detalle: opts.detalle || null } : { horario_origen: null, horario_detalle: null };
+  const escribir = async (extra) => {
+    const conFila = list.filter((p) => existentes.has(p)).map((phone) => ({ phone, horario: valor, ...extra, updated_at: at, updated_by: updatedBy || null }));
+    const sinFila = list.filter((p) => !existentes.has(p)).map((phone) => ({ phone, enabled: false, horario: valor, ...extra, updated_at: at, updated_by: updatedBy || null }));
+    if (conFila.length) await db.upsert(TABLE, conFila, 'phone');
+    if (sinFila.length) await db.upsert(TABLE, sinFila, 'phone');
+  };
+  // Sin sql/008 las columnas de origen no existen: se guarda solo el horario.
+  try { await escribir(origen); }
+  catch (e) {
+    if (!/horario_origen|horario_detalle|column|PGRST204/i.test(e.message)) throw e;
+    await escribir({});
+  }
   return { updated: list.length, horario: valor };
 }
 
@@ -153,4 +183,5 @@ async function setForzado(phone, forzar, updatedBy) {
   return { phone: p, forzar: !!forzar };
 }
 
-module.exports = { getForzadosSet, setForzado, getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, entrarEstado, salirEstado };
+module.exports = {
+  getHorarioInfoMap, getForzadosSet, setForzado, getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, entrarEstado, salirEstado };
