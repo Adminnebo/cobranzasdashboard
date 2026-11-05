@@ -210,7 +210,7 @@ export default function App() {
   const m = data.metrics;
 
   return (
-    <div className="app">
+    <div className={`app ${tab === 'clientes' ? 'app--wide' : ''}`}>
       <header className="header">
         <div>
           <h1>Cobranzas IA · Panel de cartera</h1>
@@ -294,9 +294,8 @@ export default function App() {
       )}
 
       {tab === 'clientes' && puede('cobranzas.clientes') && (
-        <div className="card" style={{ padding: 0 }}>
-          <ClientesTable clientes={data.clientes} llamadas={data.llamadas} superAdmin={!!data.verPruebas} onChanged={reloadData} />
-        </div>
+        <ClientesTable clientes={data.clientes} llamadas={data.llamadas} superAdmin={!!data.verPruebas}
+          verPromesas={puede('cobranzas.promesas')} onVerPromesas={() => setTab('promesas')} onChanged={reloadData} />
       )}
 
       {tab === 'llamadas' && puede('cobranzas.clientes') && (

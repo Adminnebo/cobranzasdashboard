@@ -3,7 +3,7 @@ import { fetchPromesasLista, revisarPromesasAhora, reabrirPromesa } from '../api
 import { money } from '../format';
 
 // Estados de una promesa (los pone el motor del follow up).
-const ESTADOS = {
+export const ESTADOS = {
   pendiente:      { label: 'Esperando la fecha', color: 'var(--text-secondary)', abierta: true },
   en_seguimiento: { label: 'Follow up en curso', color: 'var(--good-ink)', abierta: true },
   cumplida:       { label: 'Cumplida',           color: 'var(--good-ink)' },
@@ -15,24 +15,24 @@ const ESTADOS = {
   cancelada:      { label: 'Cancelada a mano',   color: 'var(--text-muted)' },
   sin_llamada:    { label: 'No se pudo llamar',  color: 'var(--text-muted)' },
 };
-const estadoDe = (e) => ESTADOS[e] || { label: e || '—', color: 'var(--text-muted)' };
+export const estadoDe = (e) => ESTADOS[e] || { label: e || '—', color: 'var(--text-muted)' };
 
-const dia = (ymd) => {
+export const dia = (ymd) => {
   if (!ymd) return '—';
   const d = new Date(String(ymd).slice(0, 10) + 'T12:00:00Z');
   return d.toLocaleDateString('es-DO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 };
-const momento = (iso) => {
+export const momento = (iso) => {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleString('es-DO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
   catch { return iso; }
 };
 
 /** Qué sigue con una promesa abierta, en palabras. */
-const ymdRD = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santo_Domingo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+export const ymdRD = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santo_Domingo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const horaRD = (d) => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Santo_Domingo', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 
-function siguiente(p, pagoHoyHora) {
+export function siguiente(p, pagoHoyHora) {
   if (p.estado === 'pendiente') {
     // "Pago hoy": prometió hoy para hoy -> follow up a la hora de la tarde (o mañana si prometió después).
     const hoy = ymdRD(new Date());

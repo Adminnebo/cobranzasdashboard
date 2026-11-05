@@ -10,7 +10,7 @@ export const horarioTexto = (h) => (h || []).map((b) => `${b.start}–${b.end}`)
  * abiertas); si no, sigue el horario general.
  *
  * variant: 'chip' (muestra el horario, va bajo el nombre) | 'btn' (🕘 en Acción)
- *          | 'bulk' (para la selección).
+ *          | 'bulk' (para la selección) | 'menu' (opción del menú ⋯ de la fila).
  */
 export default function HorarioCliente({ horario, count = 1, onSave, disabled, variant = 'btn' }) {
   const [open, setOpen] = useState(false);
@@ -74,7 +74,13 @@ export default function HorarioCliente({ horario, count = 1, onSave, disabled, v
   };
 
   const tiene = horario && horario.length > 0;
-  const boton = variant === 'chip'
+  const boton = variant === 'menu'
+    ? (
+      <button ref={btnRef} className="row-menu__item" disabled={disabled} onClick={() => (open ? setOpen(false) : abrir())}>
+        🕘 {tiene ? 'Cambiar horario propio…' : 'Horario propio…'}
+      </button>
+    )
+    : variant === 'chip'
     ? (
       <button ref={btnRef} className="horario-chip" disabled={disabled} onClick={() => (open ? setOpen(false) : abrir())}
         title="Horario propio: el bot lo llama solo en estas horas, antes que al resto. Click para cambiarlo.">
