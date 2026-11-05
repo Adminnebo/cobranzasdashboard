@@ -25,6 +25,7 @@ const promesas = require('./services/promesas');
 const fichas = require('./services/fichas');
 const iaCosto = require('./services/iaCosto');
 const history = require('./services/history');
+const cobros = require('./services/cobros');
 
 const app = express();
 
@@ -311,6 +312,37 @@ app.get('/api/history', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
+});
+
+// Cobros detectados comparando la foto diaria de la cartera del ERP con la anterior.
+// Los nombres salen de la cartera del panel (mismo código de cliente del ERP).
+app.get('/api/cobros', requirePermission('cobranzas.cartera'), async (req, res) => {
+  try {
+    const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : undefined);
+    const [r, datos] = await Promise.all([
+      cobros.resumen({ desde: ymd(req.query.desde), hasta: ymd(req.query.hasta) }),
+      getCachedData().catch(() => ({ clientes: [] })),
+    ]);
+    const porCodigo = new Map((datos.clientes || []).filter((c) => c.codigo).map((c) => [String(c.codigo), c]));
+    r.clientes = r.clientes.map((c) => {
+      const k = porCodigo.get(c.codigo);
+      return { ...c, nombre: k ? k.name : null, phone: k ? k.phone : null, deudaHoy: k ? k.deuda_total : null, enCartera: !!k };
+    });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
+app.get('/api/cobros/cliente/:codigo', requirePermission('cobranzas.cartera'), async (req, res) => {
+  try { res.json(await cobros.deCliente(req.params.codigo)); }
+  catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
+// Toma la foto ahora (reemplaza la de hoy). Solo admin.
+app.post('/api/cobros/foto', requireAdmin, async (req, res) => {
+  try { res.json(await cobros.tomarFoto({ origen: 'manual' })); }
+  catch (err) { console.error(req.path, err); res.status(500).json({ error: err.message }); }
 });
 
 // Captura manual (útil para probar / forzar un punto).
@@ -659,6 +691,17 @@ app.listen(PORT, async () => {
   cron.schedule('0 4 * * *', () => history.takeSnapshot('AM').catch((e) => console.error('[cron AM]', e.message)), opts);
   cron.schedule('0 16 * * *', () => history.takeSnapshot('PM').catch((e) => console.error('[cron PM]', e.message)), opts);
   console.log(`  Tomas programadas: 04:00 y 16:00 (${history.TZ})`);
+
+  // Cobros: una foto al día de las facturas abiertas del ERP (al cierre, después
+  // de que JH sincroniza). Al arrancar, si hoy no hay foto, se toma.
+  if (cobros.erpConfigurado()) {
+    const COBROS_CRON = process.env.COBROS_CRON || '30 22 * * *';
+    cron.schedule(COBROS_CRON, () => cobros.tomarFoto({ origen: 'cron' }).catch((e) => console.error('[cron cobros]', e.message)), opts);
+    cobros.ponerseAlDia().catch((e) => console.error('[cobros] inicio:', e.message));
+    console.log(`  Cobros: foto diaria ${COBROS_CRON} (${history.TZ})`);
+  } else {
+    console.log('  Cobros: inactivo (faltan MSSQL_SERVER / MSSQL_USER / MSSQL_PASSWORD / MSSQL_DATABASE)');
+  }
 
   // Worker de la cola: corre cada CALL_WORKER_INTERVAL_MS (default 15s). En cada
   // tick, si hay cupo de concurrencia (consultando VAPI) y estamos dentro de un

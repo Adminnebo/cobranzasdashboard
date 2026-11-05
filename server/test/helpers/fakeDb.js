@@ -1,5 +1,5 @@
 // Base en memoria con el subconjunto de PostgREST que usa el panel:
-// filtros eq / in / lte / gte / is.null / is.true / not.is.null, order y limit.
+// filtros eq / in / lt / lte / gt / gte / is.null / is.true / not.is.null, order, limit y offset.
 const tablas = {};
 let seq = 1;
 const tabla = (t) => (tablas[t] = tablas[t] || []);
@@ -7,14 +7,15 @@ const tabla = (t) => (tablas[t] = tablas[t] || []);
 function parse(query) {
   const q = new URLSearchParams(String(query || '').replace(/^\?/, ''));
   const filtros = [];
-  let order = null, limit = null;
+  let order = null, limit = null, offset = 0;
   for (const [k, v] of q) {
     if (k === 'select' || k === 'on_conflict') continue;
     if (k === 'order') { order = v; continue; }
     if (k === 'limit') { limit = parseInt(v, 10); continue; }
+    if (k === 'offset') { offset = parseInt(v, 10) || 0; continue; }
     filtros.push([k, decodeURIComponent(v)]);
   }
-  return { filtros, order, limit };
+  return { filtros, order, limit, offset };
 }
 const val = (x) => (x == null ? x : String(x));
 function cumple(row, [col, expr]) {
@@ -22,17 +23,19 @@ function cumple(row, [col, expr]) {
   if (expr === 'is.null') return v == null;
   if (expr === 'not.is.null') return v != null;
   if (expr === 'is.true') return v === true;
-  const m = expr.match(/^(eq|lte|gte|in)\.(.*)$/);
+  const m = expr.match(/^(eq|lt|lte|gt|gte|in)\.(.*)$/);
   if (!m) throw new Error('filtro no soportado: ' + expr);
   const [, op, arg] = m;
   if (op === 'eq') return val(v) === arg;
   if (op === 'lte') return v != null && String(v) <= arg;
   if (op === 'gte') return v != null && String(v) >= arg;
+  if (op === 'lt') return v != null && String(v) < arg;
+  if (op === 'gt') return v != null && String(v) > arg;
   const lista = arg.replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/^"|"$/g, ''));
   return lista.includes(val(v));
 }
 function filtrar(t, query) {
-  const { filtros, order, limit } = parse(query);
+  const { filtros, order, limit, offset } = parse(query);
   let rows = tabla(t).filter((r) => filtros.every((f) => cumple(r, f)));
   if (order) {
     const claves = order.split(',').map((o) => o.split('.'));
@@ -45,6 +48,7 @@ function filtrar(t, query) {
       return 0;
     });
   }
+  if (offset) rows = rows.slice(offset);
   return limit ? rows.slice(0, limit) : rows;
 }
 const ins = (t, rows) => (Array.isArray(rows) ? rows : [rows]).map((r) => {
