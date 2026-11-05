@@ -507,8 +507,20 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         anteriorId: r.promesa_anterior_id, createdAt: r.created_at,
       });
     }
-    res.json({ promesas: out, tope: cfg.promesaTope, pagoHoyHora: cfg.pagoHoyHora });
+    res.json({ promesas: out, tope: cfg.promesaTope, pagoHoyHora: cfg.pagoHoyHora, superAdmin });
   } catch (err) { res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') }); }
+});
+
+// Reabrir una promesa cerrada (pruebas). Solo super admins. Corre el motor
+// enseguida: si la fecha ya llegó, el follow up entra a la cola.
+app.post('/api/promesas/:id/reabrir', soloSuperAdmin, async (req, res) => {
+  try {
+    await promesas.reabrir(req.params.id, req.user ? req.user.email : null);
+    const r = await promesas.correr({ fresco: true }).catch((e) => ({ error: e.message }));
+    res.json({ ok: true, revision: r });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
 });
 
 // Fuerza la revisión de promesas ahora (útil para probar sin esperar al cron).

@@ -101,6 +101,7 @@ export const fetchData = () => get('/api/data');
 export const fetchPruebas = () => get('/api/pruebas');
 export const fetchPromesasLista = () => get('/api/promesas/lista');
 export const revisarPromesasAhora = () => post('/api/promesas/revisar', {});
+export const reabrirPromesa = (id) => post(`/api/promesas/${encodeURIComponent(id)}/reabrir`, {});
 export const addPrueba = (phone, nota) => post('/api/pruebas', { phone, nota });
 export const removePrueba = (phone) => del(`/api/pruebas/${encodeURIComponent(phone)}`);
 export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '?refresh=1' : ''}`);
