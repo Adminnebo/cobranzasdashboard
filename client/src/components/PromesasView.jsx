@@ -36,8 +36,9 @@ export function siguiente(p) {
     return `Follow up el ${dia(p.followUpFecha || p.fechaPrometida)} si sigue debiendo`;
   }
   if (p.estado === 'en_seguimiento') {
-    if (p.proximoIntento) return `No contestó · reintento ${p.reintentos} de 2: ${momento(p.proximoIntento)}`;
-    return `Llamada de follow up en cola o en curso (desde ${momento(p.seguimientoAt)})`;
+    const hasta = p.ventanaHasta ? ` · insiste hasta el ${dia(p.ventanaHasta)}` : '';
+    if (p.proximoIntento) return `Próximo intento: ${momento(p.proximoIntento)}${hasta}`;
+    return `Llamada de follow up en cola o en curso (desde ${momento(p.seguimientoAt)})${hasta}`;
   }
   return p.motivoCierre || '';
 }

@@ -31,13 +31,18 @@ const DEFAULT = {
   agentName: null,
   // Follow up (motor de promesas).
   promesaTope: 3,        // promesas incumplidas seguidas antes de pasar a una persona
-  promesaMaxAtraso: 7,   // días máx. desde la fecha prometida para todavía llamar
-  reintentoHoras: 2,     // horas hasta reintentar un follow up no contestado, el mismo día
+  promesaMaxAtraso: 7,   // (en desuso desde la ventana de follow up; se conserva la columna)
+  reintentoHoras: 2,     // el primer día de follow up: horas entre reintentos si no contesta
+  // Ventana de follow up: desde la primera llamada de follow up, cuántos días
+  // (de calendario) insiste antes de devolver al cliente al agente principal.
+  fuVentanaDias: 7,
+  fuReintentosDia1: 1,       // reintentos el primer día si no contesta (además de la 1.ª llamada)
+  fuSinFechaMismoDia: false, // si contesta sin fecha el primer día: ¿reintenta ese día? (no: al día siguiente)
+  fuCadaDias: 1,             // después del primer día: una llamada cada N días
   // Horario propio de un cliente: puede salirse del horario general, pero
   // nunca de este rango (que nadie lo llame a las 6 de la mañana).
   horarioClienteDesde: '08:00',
   horarioClienteHasta: '19:00',
-  // "Pago hoy": hora a la que sale el follow up de una promesa hecha hoy para hoy.
   // Días hábiles después de la fecha prometida para el follow up (deja que el
   // pago se refleje). Con 1: "pago mañana" (jue) -> follow up el vie.
   followUpMargenDias: 1,
@@ -72,6 +77,16 @@ function sumarHabiles(ymd, n) {
   }
   return d.toISOString().slice(0, 10);
 }
+
+/** Suma N días de calendario a una fecha YYYY-MM-DD. */
+function sumarDias(ymd, n) {
+  const d = new Date(String(ymd).slice(0, 10) + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + (parseInt(n, 10) || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+/** Último día de la ventana de follow up que empieza en `desde` (incluido). */
+const finVentana = (desde, cfg) => sumarDias(desde, Math.max(1, (cfg && cfg.fuVentanaDias) || DEFAULT.fuVentanaDias) - 1);
 
 /** Fecha en que sale el follow up de una promesa: la prometida + el margen en días hábiles. */
 const fechaFollowUp = (fechaPrometida, cfg) =>
@@ -138,6 +153,10 @@ async function get(force = false) {
         retiroManana: franja(row.retiro_manana_desde, row.retiro_manana_hasta, DEFAULT.retiroManana),
         retiroTarde: franja(row.retiro_tarde_desde, row.retiro_tarde_hasta, DEFAULT.retiroTarde),
         horarioAuto: row.horario_auto == null ? DEFAULT.horarioAuto : !!row.horario_auto,
+        fuVentanaDias: entero(row.fu_ventana_dias, DEFAULT.fuVentanaDias, 1, 30),
+        fuReintentosDia1: entero(row.fu_reintentos_dia1, DEFAULT.fuReintentosDia1, 0, 6),
+        fuSinFechaMismoDia: row.fu_sin_fecha_mismo_dia == null ? DEFAULT.fuSinFechaMismoDia : !!row.fu_sin_fecha_mismo_dia,
+        fuCadaDias: entero(row.fu_cada_dias, DEFAULT.fuCadaDias, 1, 7),
         tz: TZ,
       }
     : { ...DEFAULT, lastEnqueueDate: null, tz: TZ };
@@ -248,6 +267,11 @@ async function set(patch, by) {
     Object.assign(rango, { retiro_tarde_desde: f.desde, retiro_tarde_hasta: f.hasta });
   }
   if ('horarioAuto' in patch) rango.horario_auto = !!next.horarioAuto;
+  // Ventana de follow up (sql/011): solo si vienen.
+  if ('fuVentanaDias' in patch) rango.fu_ventana_dias = entero(next.fuVentanaDias, DEFAULT.fuVentanaDias, 1, 30);
+  if ('fuReintentosDia1' in patch) rango.fu_reintentos_dia1 = entero(next.fuReintentosDia1, DEFAULT.fuReintentosDia1, 0, 6);
+  if ('fuSinFechaMismoDia' in patch) rango.fu_sin_fecha_mismo_dia = !!next.fuSinFechaMismoDia;
+  if ('fuCadaDias' in patch) rango.fu_cada_dias = entero(next.fuCadaDias, DEFAULT.fuCadaDias, 1, 7);
   await db.upsert(TABLE, {
     id: 1,
     ...rango,
@@ -272,4 +296,4 @@ async function markEnqueued() {
   cache = null;
 }
 
-module.exports = { get, set, inWindow, abiertoPara, bloquesCliente, validarHorarioCliente, markEnqueued, ymdInTz, partsInTz, sumarHabiles, fechaFollowUp, TZ, DEFAULT };
+module.exports = { get, set, inWindow, abiertoPara, bloquesCliente, validarHorarioCliente, markEnqueued, ymdInTz, partsInTz, sumarHabiles, sumarDias, finVentana, fechaFollowUp, TZ, DEFAULT };

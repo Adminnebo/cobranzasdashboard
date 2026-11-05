@@ -20,7 +20,7 @@
  *     demás llamadas); si ya no tiene vencido, la promesa queda cumplida.
  *
  * La decisión (qué hacer con cada llamada) está en funciones puras
- * (decidir, fechaDeLlamada, proximoReintento) para poder probarla sin base.
+ * (decidir, siguienteIntento, fechaDeLlamada) para poder probarla sin base.
  */
 
 const db = require('./supabaseDb');
@@ -42,7 +42,6 @@ const VENTANA_DIAS = parseInt(process.env.PROMESA_VENTANA_DIAS || '3', 10);
 // Si un follow up se envió y a las N horas no llegó su resultado, se cuenta
 // como no contestado.
 const SIN_RESULTADO_HORAS = parseInt(process.env.PROMESA_SIN_RESULTADO_HORAS || '3', 10);
-const MAX_REINTENTOS = 2; // 1 el mismo día + 1 al día siguiente
 // Quien paga toda su deuda desaparece de la cartera. Antes de darlo por pagado
 // tiene que faltar este tiempo seguido, y la cartera tiene que haber llegado
 // completa (no menos de la mitad de la más grande vista): así una lectura a
@@ -101,10 +100,12 @@ function fechaDeLlamada(intencion, fechaParseada, fechaLlamada) {
 /**
  * Qué hacer con una llamada.
  * @param ll        { agente, intencion_pago }
- * @param ctx       { abierta: promesa abierta del cliente o null, fecha: YYYY-MM-DD|null, tope }
- * @returns {{ accion: 'nueva_promesa'|'reprogramar'|'dice_pago'|'reintento'|'incumplida'|'escalar'|'nada', fecha?: string, intento?: number }}
+ * @param ctx       { abierta: promesa abierta del cliente o null, fecha: YYYY-MM-DD|null, tope,
+ *                    hoy: YYYY-MM-DD, ahora: Date, cfg: ajustes del follow up }
+ * @returns {{ accion: 'nueva_promesa'|'reprogramar'|'dice_pago'|'seguir'|'incumplida'|'escalar'|'nada',
+ *             fecha?: string, intento?: number, proximo?: string, reintento?: boolean }}
  */
-function decidir(ll, { abierta, fecha, tope }) {
+function decidir(ll, { abierta, fecha, tope, hoy = ymdInTz(new Date()), ahora = new Date(), cfg = {} }) {
   const intencion = ll.intencion_pago;
   if (intencion === 'ya_pago') return { accion: 'dice_pago' };
 
@@ -112,12 +113,10 @@ function decidir(ll, { abierta, fecha, tope }) {
   if (esFollowUp) {
     const intento = abierta.intento || 1;
     // El follow up se hizo porque la promesa NO se cumplió: cuenta como incumplida.
+    // Una fecha nueva es lo único que corta la ventana (y empieza una nueva).
     if (fecha) return intento >= tope ? { accion: 'escalar' } : { accion: 'reprogramar', fecha, intento: intento + 1 };
-    if (intencion === 'no_contesta') {
-      if ((abierta.reintentos || 0) < MAX_REINTENTOS) return { accion: 'reintento' };
-      return intento >= tope ? { accion: 'escalar' } : { accion: 'incumplida' };
-    }
-    return intento >= tope ? { accion: 'escalar' } : { accion: 'incumplida' };
+    // Sin fecha (no contestó, o contestó sin dar una): sigue intentando dentro de la ventana.
+    return siguienteIntento(abierta, { contesto: intencion !== 'no_contesta', hoy, ahora, cfg, tope });
   }
 
   // Llamada del agente normal (o una manual): una fecha nueva es una promesa.
@@ -130,10 +129,35 @@ function decidir(ll, { abierta, fecha, tope }) {
   return { accion: 'nada' };
 }
 
-/** Cuándo reintentar un follow up no contestado: el mismo día y luego al siguiente. */
-function proximoReintento(reintentosHechos, ahora, horas) {
-  if (reintentosHechos === 0) return new Date(ahora.getTime() + horas * 3600000);
-  return inicioDelDia(sumarDias(ymdInTz(ahora), 1));
+/** ¿A esa hora todavía queda horario general ese día? (sin bloques: sí) */
+function quedaHorario(cuando, c) {
+  const blocks = Array.isArray(c.blocks) ? c.blocks : [];
+  if (!blocks.length) return true;
+  const m = schedule.partsInTz(cuando).mins;
+  const aMin = (hhmm) => { const [h, mm] = String(hhmm).split(':').map(Number); return h * 60 + mm; };
+  return blocks.some((b) => aMin(b.end) > m);
+}
+
+/**
+ * Ventana de follow up: tras un intento sin fecha nueva, cuándo es el siguiente.
+ *  - el primer día, si no contestó (o si contestó sin fecha y así está configurado),
+ *    reintenta a las X horas, hasta N veces, si todavía queda horario ese día;
+ *  - si no, una llamada cada K días (de calendario), al empezar el día;
+ *  - si ese día ya cae fuera de la ventana, se acabó: incumplida (o a una persona si era la última promesa).
+ */
+function siguienteIntento(p, { contesto, hoy, ahora, cfg, tope }) {
+  const c = { ...schedule.DEFAULT, ...(cfg || {}) };
+  const desde = p.ventana_desde ? String(p.ventana_desde).slice(0, 10) : hoy;
+  const hasta = p.ventana_hasta ? String(p.ventana_hasta).slice(0, 10) : schedule.finVentana(desde, c);
+  const intento = p.intento || 1;
+  const fin = () => (intento >= tope ? { accion: 'escalar' } : { accion: 'incumplida' });
+  if (hoy === desde && (!contesto || c.fuSinFechaMismoDia) && (p.reintentos || 0) < c.fuReintentosDia1) {
+    const cuando = new Date(ahora.getTime() + c.reintentoHoras * 3600000);
+    if (ymdInTz(cuando) === hoy && quedaHorario(cuando, c)) return { accion: 'seguir', proximo: cuando.toISOString(), reintento: true };
+  }
+  const dia = sumarDias(hoy, c.fuCadaDias);
+  if (dia > hasta) return fin();
+  return { accion: 'seguir', proximo: inicioDelDia(dia).toISOString(), reintento: false };
 }
 
 // ── IA ───────────────────────────────────────────────────────────────────────
@@ -283,7 +307,7 @@ async function procesarLlamadas(llamadas, clientesPorTel, cfg) {
     const phone = String(ll.phone);
     const abierta = abiertas.get(phone) || null;
     const fecha = fechaDeLlamada(ll.intencion_pago, fechas.get(llamadaKey(ll)) || null, ll.created_at);
-    const d = decidir(ll, { abierta, fecha, tope: cfg.promesaTope });
+    const d = decidir(ll, { abierta, fecha, tope: cfg.promesaTope, cfg });
     const cliente = clientesPorTel.get(phone) || null;
     try {
       await aplicar(d, { ll, abierta, cliente, cfg, abiertas });
@@ -318,15 +342,15 @@ async function aplicar(d, { ll, abierta, cliente, cfg, abiertas }) {
       await clienteConfig.entrarEstado(phone, 'dice_pago', ll.created_at ? ymdInTz(new Date(ll.created_at)) : null);
       return;
     }
-    case 'reintento': {
-      const hechos = abierta.reintentos || 0;
-      const cuando = proximoReintento(hechos, new Date(), cfg.reintentoHoras);
-      await db.update(TABLE, `?id=eq.${abierta.id}`, { reintentos: hechos + 1, proximo_intento_at: cuando.toISOString() });
-      abiertas.set(phone, { ...abierta, reintentos: hechos + 1, proximo_intento_at: cuando.toISOString() });
+    case 'seguir': {
+      const patch = { proximo_intento_at: d.proximo };
+      if (d.reintento) patch.reintentos = (abierta.reintentos || 0) + 1;
+      await db.update(TABLE, `?id=eq.${abierta.id}`, patch);
+      abiertas.set(phone, { ...abierta, ...patch });
       return;
     }
     case 'incumplida': {
-      await cerrar(abierta, 'incumplida', 'follow up sin nueva fecha');
+      await cerrar(abierta, 'incumplida', 'se acabó la ventana de follow up sin fecha nueva');
       await clienteConfig.salirEstado(phone);
       abiertas.delete(phone);
       return;
@@ -355,7 +379,7 @@ async function ultimaEnCola(phone) {
  * contestó", y el cliente queda fuera del follow up y apagado.
  * @returns {boolean} si quedó en cola
  */
-async function encolarFollowUp(p, cliente) {
+async function encolarFollowUp(p, cliente, extra = {}) {
   const r = await queue.enqueue(
     [{ ...cliente, promesa_id: String(p.id), fecha_prometida: p.fecha_prometida }],
     'seguimiento', null, 'seguimiento',
@@ -365,13 +389,18 @@ async function encolarFollowUp(p, cliente) {
     await clienteConfig.salirEstado(String(p.phone), { apagado: true });
     return false;
   }
-  await db.update(TABLE, `?id=eq.${p.id}`, { estado: 'en_seguimiento', seguimiento_at: new Date().toISOString(), proximo_intento_at: null });
+  await db.update(TABLE, `?id=eq.${p.id}`, { estado: 'en_seguimiento', seguimiento_at: new Date().toISOString(), proximo_intento_at: null, ...extra });
   return true;
+}
+
+/** Se acabó la ventana: los follow ups que quedaron en cola de ese cliente ya no salen. */
+async function cancelarFollowUpsEnCola(phone, motivo) {
+  await db.update('llamada_cola', `?phone=eq.${encodeURIComponent(phone)}&agente=eq.seguimiento&estado=eq.pendiente`,
+    { estado: 'cancelada', detalle: motivo });
 }
 
 async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date(), carteraOk = true } = {}) {
   const hoy = ymdInTz(ahoraFecha);
-  const corteViejas = sumarDias(hoy, -cfg.promesaMaxAtraso);
   const ahora = Date.now();
   const abiertas = await abiertasPorTelefono();
   const cuenta = {};
@@ -403,18 +432,36 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
       if (p.estado === 'pendiente') {
         if (fecha > hoy) continue;
         // El follow up sale N días hábiles después de la fecha prometida (margen
-        // de Ajustes, mínimo 1): "pago hoy" → el siguiente día hábil.
-        if (schedule.fechaFollowUp(fecha, cfg) > hoy) continue;
-        if (fecha < corteViejas) {
-          await cerrar(p, 'vieja', `más de ${cfg.promesaMaxAtraso} días de atraso`);
+        // de Ajustes, mínimo 1): "pago hoy" → el siguiente día hábil. Ese día
+        // empieza la ventana de follow up (días de calendario).
+        const desde = schedule.fechaFollowUp(fecha, cfg);
+        if (desde > hoy) continue;
+        const hasta = schedule.finVentana(desde, cfg);
+        if (hoy > hasta) {
+          // Nunca se pudo llamar en su ventana (sistema caído, llamadas apagadas).
+          await cerrar(p, 'vieja', `se acabó su ventana de follow up sin poder llamarlo (${desde} a ${hasta})`);
           await clienteConfig.salirEstado(phone);
           sumar('viejas');
           continue;
         }
-        sumar((await encolarFollowUp(p, c)) ? 'follow_ups_encolados' : 'sin_llamada');
+        sumar((await encolarFollowUp(p, c, { ventana_desde: desde, ventana_hasta: hasta, reintentos: 0 })) ? 'follow_ups_encolados' : 'sin_llamada');
         continue;
       }
-      // en_seguimiento
+      // en_seguimiento. Las que ya estaban en follow up antes de la ventana la empiezan hoy.
+      if (!p.ventana_hasta) {
+        const desde = hoy;
+        const hasta = schedule.finVentana(desde, cfg);
+        await db.update(TABLE, `?id=eq.${p.id}`, { ventana_desde: desde, ventana_hasta: hasta });
+        p.ventana_desde = desde; p.ventana_hasta = hasta;
+      }
+      if (hoy > String(p.ventana_hasta).slice(0, 10)) {
+        // Se acabó la ventana sin fecha nueva: vuelve al agente principal (o a una persona si era la última).
+        await cancelarFollowUpsEnCola(phone, 'se acabó la ventana de follow up');
+        const d = (p.intento || 1) >= cfg.promesaTope ? { accion: 'escalar' } : { accion: 'incumplida' };
+        await aplicar(d, { ll: { phone }, abierta: p, cliente: c, cfg, abiertas: new Map() });
+        sumar(`fin_ventana_${d.accion}`);
+        continue;
+      }
       if (p.proximo_intento_at) {
         if (Date.parse(p.proximo_intento_at) <= ahora) sumar((await encolarFollowUp(p, c)) ? 'reintentos_encolados' : 'sin_llamada');
         continue;
@@ -425,7 +472,7 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
       const desde = Date.parse((enCola && (enCola.enviada_at || enCola.created_at)) || p.seguimiento_at || 0);
       const sinResultado = !enCola || enCola.estado === 'error' || ahora - desde > SIN_RESULTADO_HORAS * 3600000;
       if (!sinResultado) continue;
-      const d = decidir({ agente: 'seguimiento', intencion_pago: 'no_contesta' }, { abierta: p, fecha: null, tope: cfg.promesaTope });
+      const d = decidir({ agente: 'seguimiento', intencion_pago: 'no_contesta' }, { abierta: p, fecha: null, tope: cfg.promesaTope, hoy, ahora: ahoraFecha, cfg });
       await aplicar(d, { ll: { phone }, abierta: p, cliente: c, cfg, abiertas: new Map() });
       sumar(`sin_resultado_${d.accion}`);
     } catch (err) {
@@ -580,5 +627,5 @@ module.exports = {
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,
   // puras (pruebas)
-  decidir, fechaDeLlamada, proximoReintento, inicioDelDia, llamadaKey, MAX_REINTENTOS,
+  decidir, siguienteIntento, fechaDeLlamada, inicioDelDia, llamadaKey,
 };

@@ -473,7 +473,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
       patch.agentName = b.agentName || null;
     }
     // Ajustes del follow up: solo si vienen.
-    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'followUpMargenDias', 'retiroManana', 'retiroTarde', 'horarioAuto']) if (k in b) patch[k] = b[k];
+    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'followUpMargenDias', 'retiroManana', 'retiroTarde', 'horarioAuto', 'fuVentanaDias', 'fuReintentosDia1', 'fuSinFechaMismoDia', 'fuCadaDias']) if (k in b) patch[k] = b[k];
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {
@@ -555,6 +555,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         prometidaEl: r.fecha_llamada, llamadaId: r.llamada_id || null, montoAlPrometer: r.monto_al_prometer,
         agente: r.agente, origen: r.origen,
         proximoIntento: r.proximo_intento_at, seguimientoAt: r.seguimiento_at,
+        ventanaDesde: r.ventana_desde || null, ventanaHasta: r.ventana_hasta || null,
         cerradaAt: r.cerrada_at, motivoCierre: r.motivo_cierre,
         anteriorId: r.promesa_anterior_id, createdAt: r.created_at,
       });
