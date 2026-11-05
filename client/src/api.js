@@ -111,6 +111,17 @@ export const addPrueba = (phone, nota) => post('/api/pruebas', { phone, nota });
 export const removePrueba = (phone) => del(`/api/pruebas/${encodeURIComponent(phone)}`);
 export const fetchAnalysis = (refresh = false) => get(`/api/analyze${refresh ? '?refresh=1' : ''}`);
 export const fetchHistory = () => get('/api/history');
+
+// Cobros detectados con la foto diaria de las facturas abiertas del ERP.
+export const fetchCobros = ({ desde, hasta } = {}) => {
+  const q = new URLSearchParams();
+  if (desde) q.set('desde', desde);
+  if (hasta) q.set('hasta', hasta);
+  const qs = q.toString();
+  return get(`/api/cobros${qs ? `?${qs}` : ''}`);
+};
+export const fetchCobrosCliente = (codigo) => get(`/api/cobros/cliente/${encodeURIComponent(codigo)}`);
+export const tomarFotoCobros = () => post('/api/cobros/foto', {});
 export const fetchHealth = () => get('/api/health');
 
 // Correo de cobranzas (Gmail u Outlook del cliente, vía correo-servicio).
