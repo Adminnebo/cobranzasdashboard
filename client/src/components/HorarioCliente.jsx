@@ -2,7 +2,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchSchedule } from '../api';
 
-export const horarioTexto = (h) => (h || []).map((b) => `${b.start}–${b.end}`).join(', ');
+// Días: 1 = lunes … 7 = domingo.
+export const DIAS = [[1, 'L', 'lun'], [2, 'M', 'mar'], [3, 'X', 'mié'], [4, 'J', 'jue'], [5, 'V', 'vie'], [6, 'S', 'sáb'], [7, 'D', 'dom']];
+const diasTexto = (dias) => {
+  if (!dias || !dias.length) return '';
+  const set = new Set(dias);
+  if ([1, 2, 3, 4, 5].every((d) => set.has(d)) && set.size === 5) return 'L–V ';
+  return DIAS.filter(([n]) => set.has(n)).map(([, , c]) => c).join(', ') + ' ';
+};
+export const horarioTexto = (h) => (h || []).map((b) => `${diasTexto(b.dias)}${b.start}–${b.end}`).join(' · ');
 
 /**
  * Horario propio de uno o varios clientes. Si el cliente tiene uno, el bot lo
@@ -103,15 +111,29 @@ export default function HorarioCliente({ horario, count = 1, onSave, disabled, v
             Horario propio{count > 1 ? ` de ${count} clientes` : ''}
           </div>
           <div className="sched-tz" style={{ marginTop: -4 }}>
-            El bot lo llama solo en estas horas, y antes que al resto. Puede salirse del horario general{cfg ? ` (${horarioTexto(cfg.blocks)})` : ''}, pero no de {desde}–{hasta}. Los días son los del horario general.
+            El bot lo llama solo en estas horas, y antes que al resto. Puede salirse del horario general{cfg ? ` (${horarioTexto(cfg.blocks)})` : ''}, pero no de {desde}–{hasta}. Marca días en un bloque para que valga solo esos días (ej. solo martes); sin días, valen los del horario general.
           </div>
           <div>
             {blocks.map((b, i) => (
-              <div className="sched-block" key={i}>
-                <input type="time" min={desde} max={hasta} value={b.start} onChange={(e) => setBlock(i, 'start', e.target.value)} />
-                <span>a</span>
-                <input type="time" min={desde} max={hasta} value={b.end} onChange={(e) => setBlock(i, 'end', e.target.value)} />
-                <button className="sched-x" onClick={() => setBlocks((bs) => bs.filter((_, j) => j !== i))} disabled={blocks.length <= 1} title="Quitar bloque">✕</button>
+              <div className="horario-bloque" key={i}>
+                <div className="sched-block">
+                  <input type="time" min={desde} max={hasta} value={b.start} onChange={(e) => setBlock(i, 'start', e.target.value)} />
+                  <span>a</span>
+                  <input type="time" min={desde} max={hasta} value={b.end} onChange={(e) => setBlock(i, 'end', e.target.value)} />
+                  <button className="sched-x" onClick={() => setBlocks((bs) => bs.filter((_, j) => j !== i))} disabled={blocks.length <= 1} title="Quitar bloque">✕</button>
+                </div>
+                <div className="horario-dias" role="group" aria-label="Días del bloque">
+                  {DIAS.map(([n, letra, corto]) => {
+                    const on = (b.dias || []).includes(n);
+                    return (
+                      <button key={n} type="button" className={`horario-dia ${on ? 'on' : ''}`} title={corto}
+                        onClick={() => setBlock(i, 'dias', on ? (b.dias || []).filter((x) => x !== n) : [...(b.dias || []), n].sort())}>
+                        {letra}
+                      </button>
+                    );
+                  })}
+                  <span className="horario-dias__nota">{b.dias && b.dias.length ? '' : 'días del general'}</span>
+                </div>
               </div>
             ))}
             <button className="mini-btn" onClick={() => setBlocks((bs) => [...bs, { start: '15:00', end: '17:00' }])}>+ Agregar bloque</button>

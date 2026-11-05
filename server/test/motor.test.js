@@ -196,3 +196,17 @@ test('reabrir una promesa cerrada sin llamada: vuelve a esperar y el motor la en
   assert.equal(r.follow_ups_encolados, 1);
   assert.equal(t('llamada_cola').filter((x) => x.estado === 'pendiente' && x.agente === 'seguimiento').length, 1);
 });
+
+test('margen: "pago mañana" no llama el día prometido sino el día hábil siguiente', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: true }];
+  const ayer = new Date(Date.now() - 86400000).toISOString();
+  const hoyYmd = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santo_Domingo' }).format(new Date());
+  // Promesa hecha ayer para hoy.
+  fake.tablas.promesa_pago = [{ id: 'p1', phone: TEL, estado: 'pendiente', fecha_prometida: hoyYmd, fecha_llamada: ayer, intento: 1, created_at: ayer }];
+  let r = await promesas.revisarAbiertas(clientes(), { ...cfg, followUpMargenDias: 1 });
+  assert.equal(r.follow_ups_encolados, undefined, 'con margen 1 hoy no sale');
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente');
+  r = await promesas.revisarAbiertas(clientes(), { ...cfg, followUpMargenDias: 0 });
+  assert.equal(r.follow_ups_encolados, 1, 'sin margen sale el mismo día');
+});

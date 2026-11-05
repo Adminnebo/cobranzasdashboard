@@ -12,8 +12,9 @@ export default function SchedulePanel({ onSaved }) {
 
   const rangoInicial = useRef(null);
   const pagoHoyInicial = useRef(null);
+  const margenInicial = useRef(null);
   useEffect(() => {
-    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; pagoHoyInicial.current = c.pagoHoyHora; setCfg(c); }).catch(() => {});
+    fetchSchedule().then((c) => { rangoInicial.current = `${c.horarioClienteDesde}-${c.horarioClienteHasta}`; pagoHoyInicial.current = c.pagoHoyHora; margenInicial.current = c.followUpMargenDias; setCfg(c); }).catch(() => {});
   }, []);
   // Los agentes se cargan al abrir el panel (no en cada render de la app).
   useEffect(() => {
@@ -52,6 +53,8 @@ export default function SchedulePanel({ onSaved }) {
       : {};
     // Igual la hora de "pago hoy" (sql/005).
     if (cfg.pagoHoyHora && cfg.pagoHoyHora !== pagoHoyInicial.current) rango.pagoHoyHora = cfg.pagoHoyHora;
+    // Y el margen del follow up (sql/007).
+    if (cfg.followUpMargenDias != null && Number(cfg.followUpMargenDias) !== Number(margenInicial.current)) rango.followUpMargenDias = Number(cfg.followUpMargenDias);
     setSaving(true);
     try {
       const saved = await saveSchedule({
@@ -62,6 +65,7 @@ export default function SchedulePanel({ onSaved }) {
       });
       rangoInicial.current = `${saved.horarioClienteDesde}-${saved.horarioClienteHasta}`;
       pagoHoyInicial.current = saved.pagoHoyHora;
+      margenInicial.current = saved.followUpMargenDias;
       setCfg(saved);
       setOpen(false);
       if (onSaved) onSaved();
@@ -118,6 +122,10 @@ export default function SchedulePanel({ onSaved }) {
             <label className="sched-num">
               <span>Días de atraso máximo para todavía llamar</span>
               <input type="number" min="0" max="60" value={cfg.promesaMaxAtraso ?? 7} onChange={(e) => set({ promesaMaxAtraso: e.target.value })} />
+            </label>
+            <label className="sched-num">
+              <span>Días hábiles después de la fecha prometida para el follow up (con 1: "pago mañana" el jueves → llama el viernes)</span>
+              <input type="number" min="0" max="5" value={cfg.followUpMargenDias ?? 1} onChange={(e) => set({ followUpMargenDias: e.target.value })} />
             </label>
             <label className="sched-num">
               <span>Si promete pagar "hoy", el follow up sale ese día a las (si promete después, al día siguiente)</span>

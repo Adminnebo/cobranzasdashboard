@@ -39,7 +39,34 @@ const DEFAULT = {
   horarioClienteHasta: '19:00',
   // "Pago hoy": hora a la que sale el follow up de una promesa hecha hoy para hoy.
   pagoHoyHora: '17:00',
+  // Días hábiles después de la fecha prometida para el follow up (deja que el
+  // pago se refleje). Con 1: "pago mañana" (jue) -> follow up el vie.
+  followUpMargenDias: 1,
 };
+
+// Días de la semana: 1 = lunes … 7 = domingo.
+const DIA_NUM = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+const normDias = (dias) => {
+  if (!Array.isArray(dias)) return null;
+  const out = [...new Set(dias.map((n) => parseInt(n, 10)).filter((n) => n >= 1 && n <= 7))].sort((a, b) => a - b);
+  return out.length ? out : null;
+};
+
+/** Suma N días hábiles (lunes a viernes) a una fecha YYYY-MM-DD. */
+function sumarHabiles(ymd, n) {
+  let d = new Date(String(ymd).slice(0, 10) + 'T12:00:00Z');
+  let faltan = Math.max(0, parseInt(n, 10) || 0);
+  while (faltan > 0) {
+    d = new Date(d.getTime() + 86400000);
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) faltan--;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+/** Fecha en que sale el follow up de una promesa: la prometida + el margen en días hábiles. */
+const fechaFollowUp = (fechaPrometida, cfg) =>
+  sumarHabiles(String(fechaPrometida).slice(0, 10), cfg && cfg.followUpMargenDias != null ? cfg.followUpMargenDias : 0);
 
 const hhmm = (v, def) => (/^\d{2}:\d{2}$/.test(String(v || '').slice(0, 5)) ? String(v).slice(0, 5) : def);
 
@@ -99,6 +126,7 @@ async function get(force = false) {
         horarioClienteDesde: hhmm(row.horario_cliente_desde, DEFAULT.horarioClienteDesde),
         horarioClienteHasta: hhmm(row.horario_cliente_hasta, DEFAULT.horarioClienteHasta),
         pagoHoyHora: hhmm(row.pago_hoy_hora, DEFAULT.pagoHoyHora),
+        followUpMargenDias: entero(row.follow_up_margen_dias, DEFAULT.followUpMargenDias, 0, 5),
         tz: TZ,
       }
     : { ...DEFAULT, lastEnqueueDate: null, tz: TZ };
@@ -131,22 +159,31 @@ function bloquesCliente(cfg, horario) {
   const desde = toMins((cfg && cfg.horarioClienteDesde) || DEFAULT.horarioClienteDesde);
   const hasta = toMins((cfg && cfg.horarioClienteHasta) || DEFAULT.horarioClienteHasta);
   const out = horario
-    .map((b) => ({ start: String(b.start || '').slice(0, 5), end: String(b.end || '').slice(0, 5) }))
+    .map((b) => ({ start: String(b.start || '').slice(0, 5), end: String(b.end || '').slice(0, 5), dias: normDias(b.dias) }))
     .filter((b) => /^\d{2}:\d{2}$/.test(b.start) && /^\d{2}:\d{2}$/.test(b.end))
-    .map((b) => ({ s: Math.max(desde, toMins(b.start)), e: Math.min(hasta, toMins(b.end)) }))
+    .map((b) => ({ s: Math.max(desde, toMins(b.start)), e: Math.min(hasta, toMins(b.end)), dias: b.dias }))
     .filter((b) => b.e > b.s)
-    .map((b) => ({ start: minsAHhmm(b.s), end: minsAHhmm(b.e) }));
+    .map((b) => ({ start: minsAHhmm(b.s), end: minsAHhmm(b.e), ...(b.dias ? { dias: b.dias } : {}) }));
   return out.length ? out : null;
 }
 
 /**
  * ¿Se puede llamar a este cliente ahora? Con horario propio manda el suyo (aunque
- * esté fuera del general); sin horario propio, el general. Los días (L–V) y el
- * interruptor de llamadas automáticas son los generales.
+ * esté fuera del general); sin horario propio, el general. Un bloque con días
+ * propios (ej. solo martes) usa esos días, aunque el general sea L–V; sin días,
+ * usa los del general. El interruptor de llamadas automáticas es el general.
  */
 function abiertoPara(cfg, horario, d = new Date()) {
   const propio = bloquesCliente(cfg, horario);
-  return propio ? enBloques(cfg, propio, d) : inWindow(cfg, d);
+  if (!propio) return inWindow(cfg, d);
+  if (!cfg || !cfg.enabled) return false;
+  const p = partsInTz(d);
+  const dia = DIA_NUM[p.weekday];
+  const finde = dia >= 6;
+  return propio.some((b) => {
+    if (b.dias ? !b.dias.includes(dia) : (cfg.weekdaysOnly && finde)) return false;
+    return p.mins >= toMins(b.start) && p.mins < toMins(b.end);
+  });
 }
 
 /**
@@ -168,9 +205,11 @@ function validarHorarioCliente(cfg, horario) {
     if (toMins(start) < toMins(desde) || toMins(end) > toMins(hasta)) {
       throw Object.assign(new Error(`El horario de un cliente tiene que estar entre ${desde} y ${hasta}`), { status: 400 });
     }
-    out.push({ start, end });
+    if (b.dias != null && !Array.isArray(b.dias)) throw Object.assign(new Error('Los días de un bloque deben ser una lista'), { status: 400 });
+    const dias = normDias(b.dias);
+    out.push({ start, end, ...(dias ? { dias } : {}) });
   }
-  return out.sort((a, b) => toMins(a.start) - toMins(b.start));
+  return out.sort((a, b) => toMins(a.start) - toMins(b.start) || ((a.dias || [0])[0] - (b.dias || [0])[0]));
 }
 
 async function set(patch, by) {
@@ -188,6 +227,8 @@ async function set(patch, by) {
     : {};
   // Igual con la hora de "pago hoy" (sql/005).
   if ('pagoHoyHora' in patch) rango.pago_hoy_hora = hhmm(next.pagoHoyHora, DEFAULT.pagoHoyHora);
+  // Y el margen del follow up (sql/007).
+  if ('followUpMargenDias' in patch) rango.follow_up_margen_dias = entero(next.followUpMargenDias, DEFAULT.followUpMargenDias, 0, 5);
   await db.upsert(TABLE, {
     id: 1,
     ...rango,
@@ -212,4 +253,4 @@ async function markEnqueued() {
   cache = null;
 }
 
-module.exports = { get, set, inWindow, abiertoPara, bloquesCliente, validarHorarioCliente, markEnqueued, ymdInTz, partsInTz, TZ, DEFAULT };
+module.exports = { get, set, inWindow, abiertoPara, bloquesCliente, validarHorarioCliente, markEnqueued, ymdInTz, partsInTz, sumarHabiles, fechaFollowUp, TZ, DEFAULT };
