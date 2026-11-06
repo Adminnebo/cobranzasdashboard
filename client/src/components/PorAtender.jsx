@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { marcarNoRetiro, atencionListo } from '../api';
+import { marcarNoRetiro, atencionListo, retiroVolverPendiente } from '../api';
 import { money, phoneFmt } from '../format';
 import { dia, ymdRD } from './PromesasView';
 
@@ -164,9 +164,20 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
   const ir = (phone, llamada) => onPick(String(phone), llamada || null);
 
   const noEsRetiro = async (p) => {
-    if (!window.confirm(`¿${p.nombre || phoneFmt(p.phone)} no pidió que pasen a buscar el pago?\n\nSale de la lista de retiros (la promesa sigue igual).`)) return;
+    if (!window.confirm(`¿${p.nombre || phoneFmt(p.phone)} no pidió que pasen a buscar el pago?\n\nSale de la lista de retiros y su promesa vuelve al follow up normal, con llamadas.`)) return;
     setCorrigiendo(p.id); setErrRet(null);
     try { await marcarNoRetiro(p.ficha.key); if (onCambio) await onCambio(); }
+    catch (e) { setErrRet(e.message); }
+    finally { setCorrigiendo(null); }
+  };
+
+  // Super admins: deshacer un "retirado" (p. ej. lo marcaron en una prueba).
+  const volverPendiente = async (p) => {
+    if (!window.confirm(`¿Volver a pendiente el retiro de ${p.nombre || phoneFmt(p.phone)}?\n\n` +
+      'Se borra el "retirado" (monto y RCP), su promesa se reabre y el cliente sale de "dice que pagó". ' +
+      'No se le llama: sigue siendo un retiro. Se vuelve a mandar a logística en el próximo minuto.')) return;
+    setCorrigiendo(p.id); setErrRet(null);
+    try { await retiroVolverPendiente(p.logistica.externoId); if (onCambio) await onCambio(); }
     catch (e) { setErrRet(e.message); }
     finally { setCorrigiendo(null); }
   };
@@ -214,17 +225,24 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                     extra={<LogisticaPills lg={p.logistica} />}
                     titulo="Ver la llamada donde lo pidió (en Clientes y llamadas)"
                     onClick={() => ir(p.phone, { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })}
-                    accion={k !== 'retirados' && p.ficha.key && (
-                      <button className="asis-item__accion" disabled={corrigiendo === p.id} onClick={() => noEsRetiro(p)}
-                        title="La IA se equivocó: sacarlo de los retiros">
-                        {corrigiendo === p.id ? '…' : 'No es retiro'}
-                      </button>
-                    )} />
+                    accion={k === 'retirados'
+                      ? (prom.superAdmin && p.logistica && p.logistica.externoId && (
+                        <button className="asis-item__accion" disabled={corrigiendo === p.id} onClick={() => volverPendiente(p)}
+                          title="Solo super admins: deshacer el retirado (p. ej. una prueba) y dejarlo pendiente otra vez">
+                          {corrigiendo === p.id ? '…' : '↺ Volver a pendiente'}
+                        </button>
+                      ))
+                      : p.ficha.key && (
+                        <button className="asis-item__accion" disabled={corrigiendo === p.id} onClick={() => noEsRetiro(p)}
+                          title="La IA se equivocó: sacarlo de los retiros">
+                          {corrigiendo === p.id ? '…' : 'No es retiro'}
+                        </button>
+                      )} />
                 ))}
               </div>
             ))}
           </div>
-          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase, y se manda a logística. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro" (también se cancela en logística). Si ya no debe, sale solo.</div>
+          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase, y se manda a logística. A estos clientes no se les llama. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro" (también se cancela en logística). Si ya no debe, sale solo.</div>
         </section>
       )}
     </div>

@@ -317,6 +317,30 @@ async function recibirAviso(b) {
   return { dicePago };
 }
 
+/**
+ * Deshace un "retirado" (p. ej. lo marcaron en una prueba): la promesa se
+ * reabre (sin llamadas: es un retiro), el cliente sale de "dice que pagó" y el
+ * retiro queda sin estado, así que el motor lo vuelve a mandar a logística en
+ * su próxima vuelta y guarda lo que logística responda.
+ */
+async function volverAPendiente(externoId, por = null) {
+  const ext = String(externoId || '');
+  if (!EXTERNO_OK.test(ext)) throw errStatus(400, 'externoId inválido');
+  const [f] = (await db.select(TABLE, `?select=*&externo_id=eq.${encodeURIComponent(ext)}`)) || [];
+  if (!f) throw errStatus(404, 'Ese retiro no existe');
+  if (f.estado !== 'retirado') throw errStatus(409, 'Ese retiro no está como retirado');
+  // Su promesa, si la cerró el aviso de logística ("dice que pagó").
+  const filtro = f.promesa_id ? `id=eq.${encodeURIComponent(f.promesa_id)}` : `llamada_key=eq.${encodeURIComponent(f.llamada_key || ext)}`;
+  const [p] = (await db.select('promesa_pago', `?select=id,estado&${filtro}&order=created_at.desc&limit=1`)) || [];
+  if (p && p.estado === 'dice_pago') await promesas.reabrir(p.id, por);
+  await guardar(ext, {
+    estado: null, ruta: null, motivo: null, monto_cent: null, rcp: null, atendido_en: null, fecha: null,
+    enviado_hash: null, cancelado_at: null, error: null, intentos: 0, proximo_intento_at: null,
+  });
+  console.log(`[retiros-logistica] ${ext} vuelve a pendiente${por ? ` (${por})` : ''}${p ? `, promesa ${p.id}` : ''}`);
+  return { promesaReabierta: !!(p && p.estado === 'dice_pago') };
+}
+
 /** Handler de Express para POST /api/logistica/retiros/aviso (sin sesión: lo llama logística). */
 async function manejarAviso(req, res) {
   const esperado = process.env.LOGISTICA_AVISO_TOKEN || '';
@@ -338,7 +362,7 @@ async function mapaPorLlamada() {
     const desde = new Date(Date.now() - DIAS_FILAS * 86400000).toISOString();
     const rows = await db.select(TABLE, `?select=externo_id,llamada_key,estado,ruta,motivo,monto_cent,rcp,atendido_en,error,enviado_at,actualizado_at&created_at=gte.${desde}`);
     return new Map((rows || []).filter((r) => r.llamada_key).map((r) => [r.llamada_key, {
-      estado: r.estado || null, ruta: r.ruta || null, motivo: r.motivo || null,
+      externoId: r.externo_id, estado: r.estado || null, ruta: r.ruta || null, motivo: r.motivo || null,
       montoCent: r.monto_cent != null ? Number(r.monto_cent) : null, rcp: r.rcp || null,
       atendidoEn: r.atendido_en || null, error: r.error === DE_PRUEBA ? null : (r.error || null), prueba: r.error === DE_PRUEBA,
       enviado: !!r.enviado_at, actualizadoAt: r.actualizado_at || null,
@@ -347,7 +371,7 @@ async function mapaPorLlamada() {
 }
 
 module.exports = {
-  sincronizar, manejarAviso, recibirAviso, mapaPorLlamada, configurado,
+  sincronizar, manejarAviso, recibirAviso, volverAPendiente, mapaPorLlamada, configurado,
   // puras (pruebas)
   cuerpo, externoDe, esperaMin, notaRetirado, TABLE,
 };
