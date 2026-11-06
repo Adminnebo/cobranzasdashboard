@@ -26,6 +26,7 @@ const crypto = require('crypto');
 const db = require('./supabaseDb');
 const fichas = require('./fichas');
 const promesas = require('./promesas');
+const pruebas = require('./pruebas');
 const { safeEqual } = require('../security');
 
 const TABLE = 'retiro_logistica';
@@ -43,6 +44,7 @@ const ESTADOS = new Set(['por_ubicar', 'por_asignar', 'en_ruta', 'retirado', 'no
 const FINALES = new Set(['retirado', 'no_retirado', 'cancelado']);
 const EXTERNO_OK = /^[\w.:|+-]{1,200}$/;
 const SIN_CODIGO = 'el cliente no tiene código en la cartera';
+const DE_PRUEBA = 'número de prueba: no va a logística';
 
 const base = () => (process.env.LOGISTICA_URL || '').trim().replace(/\/+$/, '');
 const configurado = () => !!(base() && process.env.LOGISTICA_TOKEN);
@@ -160,9 +162,11 @@ async function vuelta(ahora, datos, fetchImpl) {
   const porTel = new Map(clientes.map((c) => [String(c.phone), c]));
 
   const desde = new Date(ahoraMs - DIAS_FILAS * 86400000).toISOString();
-  const [rows, fichasMap, filas] = await Promise.all([
-    promesas.lista(), fichas.mapaReciente(), db.select(TABLE, `?select=*&created_at=gte.${desde}`),
+  const [rows, fichasMap, filas, setPruebas] = await Promise.all([
+    promesas.lista(), fichas.mapaReciente(), db.select(TABLE, `?select=*&created_at=gte.${desde}`), pruebas.phones(),
   ]);
+  // Los números de prueba (🧪 en el panel) nunca van a las rutas de los repartidores.
+  const esPrueba = (phone) => setPruebas.has(pruebas.phoneKey(phone));
   const previos = new Map((filas || []).map((f) => [f.externo_id, f]));
   const cuenta = {};
   const sumar = (k) => { cuenta[k] = (cuenta[k] || 0) + 1; };
@@ -178,8 +182,14 @@ async function vuelta(ahora, datos, fetchImpl) {
     if (!fx || fx.modalidad !== 'retiro') continue;
     const ext = externoDe(fx.llamada_key);
     if (!EXTERNO_OK.test(ext)) continue;
-    vigentes.add(ext);
     const prev = previos.get(ext);
+    if (esPrueba(p.phone)) {
+      // No es vigente: si se mandó antes de estar en la lista, el paso 2 lo cancela.
+      if (!prev) await guardar(ext, { llamada_key: fx.llamada_key, promesa_id: String(p.id), phone: String(p.phone), error: DE_PRUEBA });
+      sumar('prueba');
+      continue;
+    }
+    vigentes.add(ext);
     if (prev && FINALES.has(prev.estado)) continue; // logística ya lo cerró
     const c = porTel.get(String(p.phone));
     const fila = { llamada_key: fx.llamada_key, promesa_id: String(p.id), phone: String(p.phone) };
@@ -212,7 +222,7 @@ async function vuelta(ahora, datos, fetchImpl) {
     for (const f of porCancelar) {
       const noRetiro = modalidad.get(f.llamada_key) === 'no_retiro';
       const sinPago = CERRADAS_SIN_PAGO.has(estadoProm.get(String(f.promesa_id)));
-      if (!noRetiro && !sinPago) continue;
+      if (!noRetiro && !sinPago && !esPrueba(f.phone)) continue;
       if (presupuesto <= 0) break;
       presupuesto--;
       try {
@@ -266,7 +276,7 @@ async function vuelta(ahora, datos, fetchImpl) {
     }
   }
 
-  if (Object.keys(cuenta).some((k) => k !== 'sin_codigo')) console.log('[retiros-logistica]', JSON.stringify(cuenta));
+  if (Object.keys(cuenta).some((k) => k !== 'sin_codigo' && k !== 'prueba')) console.log('[retiros-logistica]', JSON.stringify(cuenta));
   return cuenta;
 }
 
@@ -330,7 +340,7 @@ async function mapaPorLlamada() {
     return new Map((rows || []).filter((r) => r.llamada_key).map((r) => [r.llamada_key, {
       estado: r.estado || null, ruta: r.ruta || null, motivo: r.motivo || null,
       montoCent: r.monto_cent != null ? Number(r.monto_cent) : null, rcp: r.rcp || null,
-      atendidoEn: r.atendido_en || null, error: r.error || null,
+      atendidoEn: r.atendido_en || null, error: r.error === DE_PRUEBA ? null : (r.error || null), prueba: r.error === DE_PRUEBA,
       enviado: !!r.enviado_at, actualizadoAt: r.actualizado_at || null,
     }]));
   } catch (err) { return new Map(); }

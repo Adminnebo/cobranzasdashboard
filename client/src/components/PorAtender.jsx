@@ -98,6 +98,9 @@ export function logisticaPill(lg) {
 /** Pastillas de logística de un retiro (estado + aviso si no llegó). */
 function LogisticaPills({ lg }) {
   if (!lg) return null;
+  if (lg.prueba && !lg.estado) {
+    return <span className="retiro-log"><span className="estado-cobro retiro-log__pill" title="Es un número de prueba: el retiro no se manda a las rutas de logística.">🧪 Prueba: no va a logística</span></span>;
+  }
   const e = logisticaPill(lg);
   if (!e && !lg.error) return null;
   return (

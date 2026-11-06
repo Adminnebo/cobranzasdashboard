@@ -305,3 +305,27 @@ test('el id para logística sale de la llamada_key, limpio', () => {
   assert.equal(rl.externoDe('8095550001|2026-11-06T10:00:00.000Z'), '8095550001|2026-11-06T10:00:00.000Z');
   assert.equal(rl.externoDe('a b/c'), 'a_b_c');
 });
+
+test('número de prueba: no se manda; si ya se había mandado, se cancela', async () => {
+  const pruebas = require('../services/pruebas');
+  sembrar();
+  const f = fetchFalso(({ method }) => (method === 'DELETE' ? { status: 200, body: { externoId: 'log:500', estado: 'cancelado' } } : { status: 200, body: { estado: 'por_asignar' } }));
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 1, 'antes de estar en la lista, va');
+
+  await pruebas.add(TEL, 'Prueba', 'equipo@nebo');
+  const r = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(r.cancelados, 1);
+  assert.equal(f.pedidos[1].method, 'DELETE');
+
+  fake.tablas.promesa_pago.push(promesa(6));
+  fake.tablas.llamada_ficha.push(ficha('log:600'));
+  const r2 = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(r2.prueba, 2);
+  assert.equal(f.pedidos.length, 2, 'el nuevo de un número de prueba no se manda');
+  assert.equal(fila('log:600').error, 'número de prueba: no va a logística');
+  assert.equal(fila('log:600').enviado_at, undefined);
+  const mapa = await rl.mapaPorLlamada();
+  assert.deepEqual([mapa.get('log:600').prueba, mapa.get('log:600').error], [true, null]);
+  await pruebas.remove(TEL);
+});
