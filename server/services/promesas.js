@@ -399,12 +399,27 @@ async function cancelarFollowUpsEnCola(phone, motivo) {
     { estado: 'cancelada', detalle: motivo });
 }
 
+const RETIRO_SIN_LLAMAR = 'pidió que pasen a buscar el pago: lo atiende logística';
+
+/** Ids de las promesas abiertas cuya llamada es un retiro (lo mismo que la pestaña 🚚 Retiros). */
+async function retirosPendientes(abiertas) {
+  const ids = new Set();
+  if (!abiertas.size) return ids;
+  const fx = await fichas.mapaReciente();
+  for (const p of abiertas.values()) {
+    const f = p.llamada_key ? fx.get(p.llamada_key) : null;
+    if (f && f.modalidad === 'retiro') ids.add(p.id);
+  }
+  return ids;
+}
+
 async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date(), carteraOk = true } = {}) {
   const hoy = ymdInTz(ahoraFecha);
   const ahora = Date.now();
   const abiertas = await abiertasPorTelefono();
   const cuenta = {};
   const sumar = (k) => { cuenta[k] = (cuenta[k] || 0) + 1; };
+  const conRetiro = await retirosPendientes(abiertas);
 
   for (const [phone, p] of abiertas) {
     const c = clientesPorTel.get(phone);
@@ -427,6 +442,14 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
           await clienteConfig.salirEstado(phone);
           sumar('cumplidas');
         }
+        continue;
+      }
+      // Pidió que pasen a buscar el pago: lo atienden una persona y logística,
+      // no se le llama. La promesa sigue abierta (sin ventana que se acabe)
+      // hasta que logística lo retire, deje de deber o alguien diga "No es retiro".
+      if (conRetiro.has(p.id)) {
+        if (p.estado === 'en_seguimiento' || p.proximo_intento_at) await cancelarFollowUpsEnCola(phone, RETIRO_SIN_LLAMAR);
+        sumar('retiros_sin_llamar');
         continue;
       }
       if (p.estado === 'pendiente') {
@@ -495,6 +518,7 @@ async function asegurarCitas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date
   if (!citas.size) return cuenta;
   const hoy = ymdInTz(ahoraFecha);
   let abiertas = null;
+  let conRetiro = new Set();
   let prendidos = null;
   for (const [phone, cita] of citas) {
     if (ymdInTz(new Date(cita.at)) !== hoy) continue;
@@ -503,8 +527,9 @@ async function asegurarCitas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date
     try {
       const enCola = await db.select('llamada_cola', `?select=id&phone=eq.${encodeURIComponent(phone)}&estado=eq.pendiente&limit=1`);
       if (enCola && enCola.length) continue;
-      if (!abiertas) abiertas = await abiertasPorTelefono();
+      if (!abiertas) { abiertas = await abiertasPorTelefono(); conRetiro = await retirosPendientes(abiertas); }
       const p = abiertas.get(phone);
+      if (p && conRetiro.has(p.id)) continue; // los retiros no se llaman
       if (p) {
         const extra = p.ventana_desde ? {} : { ventana_desde: hoy, ventana_hasta: schedule.finVentana(hoy, cfg), reintentos: 0 };
         if (await encolarFollowUp(p, c, extra)) cuenta.citas_follow_up = (cuenta.citas_follow_up || 0) + 1;

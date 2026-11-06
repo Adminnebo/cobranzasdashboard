@@ -632,6 +632,15 @@ app.post('/api/fichas/no-retiro', requirePermission('cobranzas.promesas'), async
   }
 });
 
+// Deshacer un "retirado" de logística (p. ej. una prueba): vuelve a pendiente. Solo super admins.
+app.post('/api/retiros/volver-pendiente', soloSuperAdmin, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await retirosLogistica.volverAPendiente((req.body || {}).externoId, req.user ? req.user.email : null)) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
 // Costo de la IA que lee las llamadas y su cobro en Sword (solo super admins).
 app.get('/api/ia-consumo', soloSuperAdmin, async (req, res) => {
   try { res.json(await iaCosto.resumen()); }

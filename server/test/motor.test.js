@@ -309,3 +309,29 @@ test('ventana: promesa que ya estaba en follow up sin ventana la empieza hoy', a
   assert.equal(t('promesa_pago')[0].ventana_hasta, '2026-11-18');
   assert.equal(t('promesa_pago')[0].estado, 'en_seguimiento');
 });
+
+test('retiro: no se le llama, ni se cierra por ventana; el follow up que ya estaba en cola se cancela', async () => {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: false, estado_cobro: 'promesa' }];
+  const viejo = new Date(Date.now() - 20 * 86400000).toISOString();
+  fake.tablas.promesa_pago = [{ id: 1, phone: TEL, llamada_key: 'k:1', fecha_prometida: viejo.slice(0, 10), estado: 'pendiente', intento: 1, created_at: viejo }];
+  fake.tablas.llamada_ficha = [{ llamada_key: 'k:1', phone: TEL, llamada_at: hoyISO(), modalidad: 'retiro', retiro: { fecha: null, texto: 'pasen a buscarlo' } }];
+  let r = await promesas.revisarAbiertas(clientes(), cfg);
+  assert.equal(r.retiros_sin_llamar, 1);
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente', 'no se cierra como vieja: lo atiende logística');
+  assert.equal(t('llamada_cola').length, 0, 'no se encola follow up');
+
+  // Ya estaba en follow up con una llamada en cola: se cancela.
+  Object.assign(t('promesa_pago')[0], { estado: 'en_seguimiento', ventana_desde: viejo.slice(0, 10), ventana_hasta: viejo.slice(0, 10) });
+  fake.tablas.llamada_cola = [{ id: 1, phone: TEL, agente: 'seguimiento', estado: 'pendiente', created_at: hoyISO() }];
+  r = await promesas.revisarAbiertas(clientes(), cfg);
+  assert.equal(r.retiros_sin_llamar, 1);
+  assert.equal(t('llamada_cola')[0].estado, 'cancelada');
+  assert.equal(t('promesa_pago')[0].estado, 'en_seguimiento', 'no pasa a incumplida aunque la ventana ya pasó');
+
+  // "No es retiro": vuelve al flujo normal (ventana vencida → incumplida).
+  t('llamada_ficha')[0].modalidad = 'no_retiro';
+  r = await promesas.revisarAbiertas(clientes(), cfg);
+  assert.equal(r.retiros_sin_llamar, undefined);
+  assert.notEqual(t('promesa_pago')[0].estado, 'en_seguimiento');
+});

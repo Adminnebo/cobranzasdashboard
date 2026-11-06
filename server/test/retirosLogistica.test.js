@@ -300,6 +300,31 @@ test('retirado → el cliente pasa a "dice que pagó" con la nota, y su promesa 
   assert.equal(rl.notaRetirado({ montoCent: null, rcp: 'RCP-9' }), 'Retirado por logística con el RCP-9');
 });
 
+test('volver a pendiente: deshace el retirado, reabre la promesa y lo vuelve a mandar', async () => {
+  sembrar();
+  await rl.sincronizar({ datos: datos(), fetchImpl: fetchFalso() });
+  await assert.rejects(rl.volverAPendiente('log:500'), /no está como retirado/);
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', montoCent: 1000000, rcp: 'RCP-0012', atendidoEn: '2026-11-10T15:20:00Z' });
+  assert.equal(t('promesa_pago')[0].estado, 'dice_pago');
+
+  const r = await rl.volverAPendiente('log:500', 'admin@x');
+  assert.equal(r.promesaReabierta, true);
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente');
+  assert.equal(config().estado_cobro, 'promesa', 'sale de "dice que pagó"');
+  const x = fila();
+  assert.equal(x.estado, null);
+  assert.equal(x.rcp, null);
+  assert.equal(x.monto_cent, null);
+
+  // Próxima vuelta del motor: se vuelve a mandar y queda lo que responda logística.
+  const f = fetchFalso(() => ({ status: 200, body: { externoId: 'log:500', estado: 'por_asignar' } }));
+  const s = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(s.enviados, 1);
+  assert.equal(f.pedidos[0].method, 'PUT');
+  assert.equal(fila().estado, 'por_asignar');
+  await assert.rejects(rl.volverAPendiente('nada'), /no existe/);
+});
+
 test('el id para logística sale de la llamada_key, limpio', () => {
   assert.equal(rl.externoDe('log:123'), 'log:123');
   assert.equal(rl.externoDe('8095550001|2026-11-06T10:00:00.000Z'), '8095550001|2026-11-06T10:00:00.000Z');
