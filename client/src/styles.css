@@ -674,6 +674,13 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .asis-item__name { font-size: 0.84rem; font-weight: 620; min-width: 0; overflow-wrap: anywhere; }
 .asis-item__num { color: var(--critical); font-weight: 600; font-size: 0.8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .asis-item__l2 { display: block; font-size: 0.74rem; color: var(--text-secondary); margin-top: 2px; }
+/* Estado del retiro en logística (pestaña Retiros) */
+.retiro-log { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.retiro-log__pill { white-space: normal; overflow-wrap: anywhere; }
+.retiro-log__pill--ruta { border-color: color-mix(in srgb, var(--series-1) 45%, transparent); color: var(--series-1); }
+.retiro-log__pill--ok { border-color: color-mix(in srgb, var(--good) 45%, transparent); color: var(--good-ink); }
+.retiro-log__pill--mal { border-color: color-mix(in srgb, var(--critical) 45%, transparent); color: var(--critical); }
+.retiro-log__pill--aviso { border-color: color-mix(in srgb, var(--warning) 55%, transparent); color: var(--text-primary); background: color-mix(in srgb, var(--warning) 14%, transparent); }
 @media (max-width: 760px) {
     }
 

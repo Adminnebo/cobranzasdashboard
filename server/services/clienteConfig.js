@@ -59,15 +59,16 @@ async function getEstadoMap() {
 }
 
 async function filaDe(phone) {
-  const rows = await db.select(TABLE, `?select=phone,enabled,estado_cobro,enabled_antes&phone=eq.${encodeURIComponent(phone)}`);
+  const rows = await db.select(TABLE, `?select=phone,enabled,estado_cobro,estado_detalle,enabled_antes&phone=eq.${encodeURIComponent(phone)}`);
   return (rows && rows[0]) || null;
 }
 
 /**
  * Pone al cliente en un estado de cobro y lo apaga para el agente normal.
  * Recuerda si estaba prendido (solo al entrar desde "normal") para devolverlo igual.
+ * `por` = quién lo hizo (queda en updated_by).
  */
-async function entrarEstado(phone, estado, detalle) {
+async function entrarEstado(phone, estado, detalle, por = 'sistema (follow up)') {
   if (!ESTADOS.has(estado)) throw new Error(`estado de cobro inválido: ${estado}`);
   const r = await filaDe(phone);
   const yaEnEstado = r && r.estado_cobro;
@@ -79,8 +80,14 @@ async function entrarEstado(phone, estado, detalle) {
     estado_at: new Date().toISOString(),
     enabled_antes: yaEnEstado ? r.enabled_antes : !!(r && r.enabled),
     updated_at: new Date().toISOString(),
-    updated_by: 'sistema (follow up)',
+    updated_by: por,
   }, 'phone');
+}
+
+/** Estado de cobro de un cliente: { estado, detalle } o null. */
+async function estadoDe(phone) {
+  const r = await filaDe(String(phone));
+  return r && r.estado_cobro ? { estado: r.estado_cobro, detalle: r.estado_detalle || null } : null;
 }
 
 /**
@@ -184,4 +191,4 @@ async function setForzado(phone, forzar, updatedBy) {
 }
 
 module.exports = {
-  getHorarioInfoMap, getForzadosSet, setForzado, getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, entrarEstado, salirEstado };
+  getHorarioInfoMap, getForzadosSet, setForzado, getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, estadoDe, entrarEstado, salirEstado };

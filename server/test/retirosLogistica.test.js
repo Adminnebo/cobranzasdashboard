@@ -1,0 +1,331 @@
+// Retiros → logística: motor (PUT / DELETE / reintentos) y aviso de vuelta, con la base en memoria.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('path');
+
+const fake = require('./helpers/fakeDb');
+require.cache[path.resolve(__dirname, '../services/supabaseDb.js')] = { exports: fake, loaded: true, id: 'fake' };
+delete process.env.OPENAI_API_KEY;
+process.env.LOGISTICA_URL = 'https://logistica.test/';
+process.env.LOGISTICA_TOKEN = 'tok-integracion';
+process.env.LOGISTICA_AVISO_TOKEN = 'tok-aviso';
+const rl = require('../services/retirosLogistica');
+const fichas = require('../services/fichas');
+
+const TEL = '8095550001';
+const t = (n) => fake.tablas[n] || [];
+const fila = (ext = 'log:500') => t('retiro_logistica').find((r) => r.externo_id === ext);
+const config = () => t('cliente_config').find((r) => r.phone === TEL) || {};
+const datos = (extra = {}) => ({ clientes: [{ phone: TEL, name: 'Ferretería Uno', codigo: '1234', deuda_vencida: 8000, ...extra }] });
+let seq = 0;
+const ahoraISO = () => new Date(Date.now() - 1000 + seq++).toISOString();
+
+function promesa(id, extra = {}) {
+  return { id, phone: TEL, nombre: 'Ferretería Uno', llamada_key: `log:${id}00`, fecha_prometida: '2026-11-10', monto_al_prometer: 10000,
+    estado: 'pendiente', intento: 1, created_at: ahoraISO(), ...extra };
+}
+function ficha(key, extra = {}) {
+  return { llamada_key: key, phone: TEL, llamada_at: new Date().toISOString(), modalidad: 'retiro',
+    retiro: { fecha: '2026-11-10', franja: 'tarde', desde: '14:00', hasta: '18:00', texto: 'Pasen a buscar el cheque el martes en la tarde' }, ...extra };
+}
+function sembrar() {
+  fake.reset();
+  fake.tablas.cliente_config = [{ phone: TEL, enabled: false, estado_cobro: 'promesa', estado_detalle: '2026-11-10', enabled_antes: true }];
+  fake.tablas.promesa_pago = [promesa(5)];
+  fake.tablas.llamada_ficha = [ficha('log:500')];
+}
+
+/** fetch simulado: guarda los pedidos y responde lo que diga `responder`. */
+function fetchFalso(responder = () => ({ status: 200, body: { externoId: 'log:500', estado: 'por_ubicar', ruta: null } })) {
+  const pedidos = [];
+  const f = async (url, opts) => {
+    pedidos.push({ url, method: opts.method, headers: opts.headers, body: opts.body ? JSON.parse(opts.body) : null });
+    const r = responder({ url, method: opts.method });
+    if (r instanceof Error) throw r;
+    return { status: r.status, ok: r.status >= 200 && r.status < 300, text: async () => (r.body ? JSON.stringify(r.body) : '') };
+  };
+  f.pedidos = pedidos;
+  return f;
+}
+
+function resFalso() {
+  return { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+}
+
+test('manda solo los retiros de promesas abiertas, con el cuerpo del contrato', async () => {
+  sembrar();
+  fake.tablas.promesa_pago.push(
+    promesa(6, { phone: '8095550002' }),                    // retiro, pero el cliente no tiene código
+    promesa(7, { estado: 'cumplida' }),                      // cerrada: no va
+    promesa(8),                                              // ficha de transferencia: no va
+  );
+  fake.tablas.llamada_ficha.push(ficha('log:600', { phone: '8095550002' }), ficha('log:700'), ficha('log:800', { modalidad: 'transferencia', retiro: null }));
+  const d = { clientes: [...datos().clientes, { phone: '8095550002', name: 'Sin Código', codigo: '' }] };
+
+  const f = fetchFalso();
+  const r = await rl.sincronizar({ datos: d, fetchImpl: f });
+  assert.equal(r.enviados, 1);
+  assert.equal(f.pedidos.length, 1);
+  const p = f.pedidos[0];
+  assert.equal(p.method, 'PUT');
+  assert.equal(p.url, 'https://logistica.test/api/integraciones/retiros/log%3A500');
+  assert.equal(p.headers['x-integracion-token'], 'tok-integracion');
+  assert.deepEqual(p.body, {
+    clienteCodigo: '1234', nombre: 'Ferretería Uno', telefono: TEL, fecha: '2026-11-10', franja: 'tarde', desde: '14:00', hasta: '18:00',
+    frase: 'Pasen a buscar el cheque el martes en la tarde', montoEsperado: 10000, promesaId: '5',
+  });
+  const x = fila();
+  assert.equal(x.estado, 'por_ubicar', 'guarda el estado que devolvió el PUT');
+  assert.equal(x.cliente_codigo, '1234');
+  assert.equal(x.promesa_id, '5');
+  assert.ok(x.enviado_hash && x.enviado_at);
+  assert.equal(fila('log:600').error, 'el cliente no tiene código en la cartera');
+  assert.equal(fila('log:600').enviado_at, undefined);
+  assert.equal(fila('log:700'), undefined);
+  assert.equal(fila('log:800'), undefined);
+});
+
+test('sin cambios no se reenvía; si cambia la ficha, sí', async () => {
+  sembrar();
+  const f = fetchFalso();
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 1, 'igual que lo enviado: no se vuelve a mandar');
+
+  t('llamada_ficha')[0].retiro = { ...t('llamada_ficha')[0].retiro, franja: 'hora', desde: '10:00', hasta: '11:00' };
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 2);
+  assert.equal(f.pedidos[1].method, 'PUT');
+  assert.equal(f.pedidos[1].body.desde, '10:00');
+  assert.equal(fila().enviado.desde, '10:00');
+});
+
+test('"No es retiro" → DELETE una sola vez', async () => {
+  sembrar();
+  const f = fetchFalso(({ method }) => (method === 'DELETE' ? { status: 200, body: { externoId: 'log:500', estado: 'cancelado' } } : { status: 200, body: { estado: 'por_asignar' } }));
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  await fichas.marcarNoRetiro('log:500', 'equipo@jh');
+  const r = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(r.cancelados, 1);
+  assert.equal(f.pedidos[1].method, 'DELETE');
+  assert.equal(f.pedidos[1].url, 'https://logistica.test/api/integraciones/retiros/log%3A500');
+  assert.ok(fila().cancelado_at);
+  assert.equal(fila().estado, 'cancelado');
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 2, 'ya cancelado: no se repite');
+});
+
+test('promesa cancelada → DELETE; cumplida no; 409 queda como final', async () => {
+  sembrar();
+  fake.tablas.promesa_pago.push(promesa(6));
+  fake.tablas.llamada_ficha.push(ficha('log:600'));
+  const f = fetchFalso(({ method }) => (method === 'DELETE' ? { status: 409, body: { estado: 'retirado', rcp: 'RCP-0001' } } : { status: 200, body: { estado: 'por_ubicar' } }));
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 2);
+
+  t('promesa_pago').find((p) => p.id === 5).estado = 'cancelada';
+  t('promesa_pago').find((p) => p.id === 6).estado = 'cumplida';
+  const r = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(r.ya_atendidos, 1);
+  assert.equal(f.pedidos.length, 3);
+  assert.equal(f.pedidos[2].method, 'DELETE');
+  assert.match(f.pedidos[2].url, /log%3A500$/);
+  assert.equal(fila().estado, 'retirado');
+  assert.ok(fila().cancelado_at);
+  assert.match(fila().error, /409/);
+  assert.equal(fila('log:600').cancelado_at, null, 'cumplida (ya no debe): no se cancela');
+
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 3, 'tras el 409 no se reintenta');
+});
+
+test('retirado: no se cancela ni se reenvía aunque luego digan "No es retiro"', async () => {
+  sembrar();
+  const f = fetchFalso();
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', montoCent: 1000000, rcp: 'RCP-0012', atendidoEn: new Date().toISOString(), ruta: { referencia: 'R-0012', fecha: '2026-11-10', repartidor: 'Lendy' } });
+  await fichas.marcarNoRetiro('log:500', 'equipo@jh');
+  t('llamada_ficha')[0].retiro = null;
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 1, 'solo el PUT inicial');
+  assert.equal(fila().cancelado_at, null);
+});
+
+test('logística caída: guarda el error y espera 1, 2, 4… min antes de reintentar', async () => {
+  sembrar();
+  const f = fetchFalso(() => ({ status: 502, body: { error: 'bad gateway' } }));
+  const t0 = new Date();
+  const r = await rl.sincronizar({ datos: datos(), fetchImpl: f, ahora: t0 });
+  assert.equal(r.errores, 1);
+  assert.match(fila().error, /502/);
+  assert.equal(fila().intentos, 1);
+  assert.equal(Date.parse(fila().proximo_intento_at), t0.getTime() + 60000);
+  assert.equal(fila().enviado_hash, undefined, 'no quedó como enviado');
+
+  await rl.sincronizar({ datos: datos(), fetchImpl: f, ahora: new Date(t0.getTime() + 30000) });
+  assert.equal(f.pedidos.length, 1, 'antes del minuto no reintenta');
+
+  const t1 = new Date(t0.getTime() + 61000);
+  await rl.sincronizar({ datos: datos(), fetchImpl: f, ahora: t1 });
+  assert.equal(f.pedidos.length, 2);
+  assert.equal(fila().intentos, 2);
+  assert.equal(Date.parse(fila().proximo_intento_at), t1.getTime() + 120000);
+
+  // Sin red (timeout): tampoco revienta.
+  const caido = fetchFalso(() => new Error('The operation was aborted due to timeout'));
+  const t2 = new Date(t1.getTime() + 121000);
+  const r2 = await rl.sincronizar({ datos: datos(), fetchImpl: caido, ahora: t2 });
+  assert.equal(r2.errores, 1);
+  assert.equal(fila().intentos, 3);
+  assert.match(fila().error, /timeout/);
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 9].map(rl.esperaMin), [1, 2, 4, 8, 16, 30, 30]);
+
+  // Vuelve logística: se manda y se limpia el error.
+  const ok = fetchFalso();
+  await rl.sincronizar({ datos: datos(), fetchImpl: ok, ahora: new Date(t2.getTime() + 5 * 60000) });
+  assert.equal(fila().error, null);
+  assert.equal(fila().intentos, 0);
+  assert.ok(fila().enviado_hash);
+});
+
+test('a lo sumo 20 pedidos por vuelta', async () => {
+  sembrar();
+  for (let i = 10; i < 35; i++) {
+    fake.tablas.promesa_pago.push(promesa(i, { phone: `80955510${i}` }));
+    fake.tablas.llamada_ficha.push(ficha(`log:${i}00`, { phone: `80955510${i}` }));
+  }
+  const d = { clientes: [...datos().clientes, ...Array.from({ length: 25 }, (_, k) => ({ phone: `80955510${k + 10}`, name: `C${k}`, codigo: String(k + 10) }))] };
+  const f = fetchFalso();
+  const r = await rl.sincronizar({ datos: d, fetchImpl: f });
+  assert.equal(f.pedidos.length, 20);
+  assert.equal(r.para_la_proxima, 6);
+  await rl.sincronizar({ datos: d, fetchImpl: f });
+  assert.equal(f.pedidos.length, 26, 'los que faltaban salen en la próxima vuelta');
+});
+
+test('sin LOGISTICA_URL no hace nada', async () => {
+  sembrar();
+  const antes = process.env.LOGISTICA_URL;
+  delete process.env.LOGISTICA_URL;
+  try {
+    const f = fetchFalso();
+    const r = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+    assert.ok(r.omitida);
+    assert.equal(f.pedidos.length, 0);
+    assert.equal(rl.configurado(), false);
+  } finally { process.env.LOGISTICA_URL = antes; }
+});
+
+test('aviso: 503 sin token configurado, 401 con token malo, 200 guarda', async () => {
+  sembrar();
+  const antes = process.env.LOGISTICA_AVISO_TOKEN;
+  delete process.env.LOGISTICA_AVISO_TOKEN;
+  let res = resFalso();
+  await rl.manejarAviso({ headers: { 'x-logistica-token': 'tok-aviso' }, body: { externoId: 'log:500', estado: 'en_ruta' } }, res);
+  assert.equal(res.statusCode, 503);
+  process.env.LOGISTICA_AVISO_TOKEN = antes;
+
+  res = resFalso();
+  await rl.manejarAviso({ headers: { 'x-logistica-token': 'otro' }, body: { externoId: 'log:500', estado: 'en_ruta' } }, res);
+  assert.equal(res.statusCode, 401);
+  res = resFalso();
+  await rl.manejarAviso({ headers: {}, body: { externoId: 'log:500', estado: 'en_ruta' } }, res);
+  assert.equal(res.statusCode, 401);
+  assert.equal(t('retiro_logistica').length, 0);
+
+  res = resFalso();
+  await rl.manejarAviso({ headers: { 'x-logistica-token': 'tok-aviso' }, body: { externoId: 'log:500', estado: 'raro' } }, res);
+  assert.equal(res.statusCode, 400);
+
+  res = resFalso();
+  await rl.manejarAviso({ headers: { 'x-logistica-token': 'tok-aviso' }, body: {
+    externoId: 'log:500', estado: 'en_ruta', fecha: '2026-11-10', ruta: { referencia: 'R-0012', fecha: '2026-11-10', repartidor: 'Lendy' },
+    motivo: null, montoCent: null, rcp: null, atendidoEn: null,
+  } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  const x = fila();
+  assert.equal(x.estado, 'en_ruta');
+  assert.deepEqual(x.ruta, { referencia: 'R-0012', fecha: '2026-11-10', repartidor: 'Lendy' });
+  assert.equal(x.fecha, '2026-11-10');
+  assert.equal(x.phone, TEL, 'sin fila previa: toma el cliente de la promesa');
+  assert.equal(config().estado_cobro, 'promesa', 'en ruta no cambia nada del cliente');
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente');
+
+  // Otro estado no cierra la promesa.
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'no_retirado', motivo: 'No estaba el encargado' });
+  assert.equal(fila().estado, 'no_retirado');
+  assert.equal(fila().motivo, 'No estaba el encargado');
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente');
+
+  const mapa = await rl.mapaPorLlamada();
+  assert.equal(mapa.get('log:500').estado, 'no_retirado');
+  assert.equal(mapa.get('log:500').motivo, 'No estaba el encargado');
+});
+
+test('retirado → el cliente pasa a "dice que pagó" con la nota, y su promesa se cierra', async () => {
+  sembrar();
+  await rl.sincronizar({ datos: datos(), fetchImpl: fetchFalso() });
+  const res = resFalso();
+  const aviso = { externoId: 'log:500', estado: 'retirado', fecha: '2026-11-10', ruta: { referencia: 'R-0012', fecha: '2026-11-10', repartidor: 'Lendy' },
+    motivo: null, montoCent: 1000000, rcp: 'RCP-0012', atendidoEn: '2026-11-10T15:20:00Z' };
+  await rl.manejarAviso({ headers: { 'x-logistica-token': 'tok-aviso' }, body: aviso }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.dicePago, true);
+
+  const c = config();
+  assert.equal(c.estado_cobro, 'dice_pago');
+  assert.equal(c.estado_detalle, 'Retirado por logística: RD$ 10,000 con el RCP-0012');
+  assert.equal(c.enabled, false);
+  assert.equal(c.enabled_antes, true, 'recuerda que estaba prendido');
+  assert.equal(c.updated_by, 'sistema (logística)');
+  const p = t('promesa_pago')[0];
+  assert.equal(p.estado, 'dice_pago', 'igual que cuando dice en la llamada que ya pagó: el follow up no lo llama');
+  assert.equal(p.motivo_cierre, 'Retirado por logística: RD$ 10,000 con el RCP-0012');
+  const x = fila();
+  assert.equal(x.estado, 'retirado');
+  assert.equal(x.monto_cent, 1000000);
+  assert.equal(x.rcp, 'RCP-0012');
+  assert.equal(x.atendido_en, '2026-11-10T15:20:00Z');
+
+  // Aviso repetido (logística reintenta): no vuelve a tocar al cliente.
+  const at = c.estado_at;
+  const res2 = resFalso();
+  await rl.manejarAviso({ headers: { 'x-logistica-token': 'tok-aviso' }, body: aviso }, res2);
+  assert.equal(res2.statusCode, 200);
+  assert.equal(res2.body.dicePago, false);
+  assert.equal(config().estado_at, at);
+
+  assert.equal(rl.notaRetirado({ montoCent: 1234550, rcp: null }), 'Retirado por logística: RD$ 12,345.5');
+  assert.equal(rl.notaRetirado({ montoCent: null, rcp: 'RCP-9' }), 'Retirado por logística con el RCP-9');
+});
+
+test('el id para logística sale de la llamada_key, limpio', () => {
+  assert.equal(rl.externoDe('log:123'), 'log:123');
+  assert.equal(rl.externoDe('8095550001|2026-11-06T10:00:00.000Z'), '8095550001|2026-11-06T10:00:00.000Z');
+  assert.equal(rl.externoDe('a b/c'), 'a_b_c');
+});
+
+test('número de prueba: no se manda; si ya se había mandado, se cancela', async () => {
+  const pruebas = require('../services/pruebas');
+  sembrar();
+  const f = fetchFalso(({ method }) => (method === 'DELETE' ? { status: 200, body: { externoId: 'log:500', estado: 'cancelado' } } : { status: 200, body: { estado: 'por_asignar' } }));
+  await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(f.pedidos.length, 1, 'antes de estar en la lista, va');
+
+  await pruebas.add(TEL, 'Prueba', 'equipo@nebo');
+  const r = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(r.cancelados, 1);
+  assert.equal(f.pedidos[1].method, 'DELETE');
+
+  fake.tablas.promesa_pago.push(promesa(6));
+  fake.tablas.llamada_ficha.push(ficha('log:600'));
+  const r2 = await rl.sincronizar({ datos: datos(), fetchImpl: f });
+  assert.equal(r2.prueba, 2);
+  assert.equal(f.pedidos.length, 2, 'el nuevo de un número de prueba no se manda');
+  assert.equal(fila('log:600').error, 'número de prueba: no va a logística');
+  assert.equal(fila('log:600').enviado_at, undefined);
+  const mapa = await rl.mapaPorLlamada();
+  assert.deepEqual([mapa.get('log:600').prueba, mapa.get('log:600').error], [true, null]);
+  await pruebas.remove(TEL);
+});
