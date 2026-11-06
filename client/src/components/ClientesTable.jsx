@@ -749,12 +749,16 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
 function QuienLlama({ c }) {
   const e = {
     promesa: { txt: '↩ Follow up activo', cls: 'fu', tip: `Prometió pagar${c.estadoDetalle ? ' el ' + fechaCorta(c.estadoDetalle) : ''}: si sigue debiendo, lo llama el agente de follow up (el día que diga Promesas, según el margen). El agente normal está apagado mientras tanto.` },
-    dice_pago: { txt: '⏸ En pausa', cls: 'pausa', tip: 'Dijo que ya pagó: ningún agente lo llama hasta que el equipo lo vuelva a prender.' },
+    dice_pago: { txt: '⏸ En pausa', cls: 'pausa', tip: `${notaEstado(c) || 'Dijo que ya pagó'}: ningún agente lo llama hasta que el equipo lo vuelva a prender.` },
     escalar: { txt: '⏸ En pausa', cls: 'pausa', tip: 'Pasar a una persona: ningún agente lo llama hasta que alguien lo revise y lo vuelva a prender.' },
   }[c.estadoCobro];
   if (!e) return null;
   return <div className={`quien-llama quien-llama--${e.cls}`} title={e.tip}>{e.txt}</div>;
 }
+
+// El detalle de "dice que pagó" es la fecha de la llamada, o una nota (p.ej.
+// "Retirado por logística: RD$ 10,000 con el RCP-…"). Devuelve solo la nota.
+const notaEstado = (c) => (c.estadoDetalle && !/^\d{4}-\d{2}-\d{2}/.test(c.estadoDetalle) ? c.estadoDetalle : null);
 
 // Estado de cobro que maneja el follow up automático.
 const fechaCorta = (ymd) => {
@@ -766,7 +770,7 @@ function EstadoCobro({ c }) {
   if (!c.estadoCobro) return null;
   const e = {
     promesa: { txt: `⏳ Promesa${c.estadoDetalle ? ' · ' + fechaCorta(c.estadoDetalle) : ''}`, tip: 'Prometió pagar: el agente normal no lo llama; ese día lo llama el follow up si sigue debiendo.' },
-    dice_pago: { txt: '💬 Dice que pagó', tip: 'Dijo que ya pagó. No se llama. Si el equipo verifica que no pagó, que lo vuelva a prender.' },
+    dice_pago: { txt: '💬 Dice que pagó', tip: `${notaEstado(c) ? notaEstado(c) + '. ' : 'Dijo que ya pagó. '}No se llama. Si el equipo verifica que no pagó, que lo vuelva a prender.` },
     escalar: { txt: '🙋 Pasar a una persona', tip: 'Varias promesas incumplidas seguidas. No se llama hasta que alguien lo revise y lo vuelva a prender.' },
   }[c.estadoCobro];
   if (!e) return null;

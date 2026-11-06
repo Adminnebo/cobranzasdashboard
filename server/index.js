@@ -26,6 +26,7 @@ const fichas = require('./services/fichas');
 const iaCosto = require('./services/iaCosto');
 const history = require('./services/history');
 const cobros = require('./services/cobros');
+const retirosLogistica = require('./services/retirosLogistica');
 
 const app = express();
 
@@ -36,8 +37,8 @@ app.use(cors());
 app.use(express.json());
 
 // Rate limit por IP SOLO para el panel. Endpoints de máquina/audio (health,
-// config, recordings, hooks) EXENTOS.
-const esMaquinaCo = req => /^\/(health|config|recordings|hooks)/.test(req.path);
+// config, recordings, hooks, avisos de logística) EXENTOS.
+const esMaquinaCo = req => /^\/(health|config|recordings|hooks|logistica)/.test(req.path);
 app.use('/api', rateLimit({
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
   max: Number(process.env.RATE_LIMIT_USER || 300),
@@ -67,6 +68,10 @@ app.get('/api/config', (req, res) => res.json({ ...publicConfig(), correo: corre
 // allowlist de hosts. Re-sirve el WAV con Content-Length + Range para que el
 // reproductor inline funcione.
 app.get('/api/recordings/proxy', require('./services/recordingProxy').handle);
+
+// Avisos de logística sobre los retiros (por ubicar, en ruta, retirado…). Sin
+// sesión: lo llama el servidor de logística con x-logistica-token.
+app.post('/api/logistica/retiros/aviso', retirosLogistica.manejarAviso);
 
 // A partir de aquí, todas las rutas /api requieren sesión (si la auth está activada).
 app.use('/api', requireAuth);
@@ -521,8 +526,9 @@ app.get('/api/promesas', requirePermission('cobranzas.promesas'), async (req, re
 // Las de números de prueba solo las ven los super admins (marcadas "prueba").
 app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (req, res) => {
   try {
-    const [rows, { clientes }, setPruebas, superAdmin, cfg, fichasMap] = await Promise.all([
+    const [rows, { clientes }, setPruebas, superAdmin, cfg, fichasMap, logisticaMap] = await Promise.all([
       promesas.lista(), getCachedData(), pruebas.phones(), esSuperAdmin(req), schedule.get(), fichas.mapaReciente(),
+      retirosLogistica.mapaPorLlamada(),
     ]);
     // Ficha de la llamada que dejó cada promesa (retiro, hora pedida). Si un
     // follow up reprogramó sin repetir cómo paga, vale lo dicho en la anterior.
@@ -552,6 +558,8 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         fechaPrometida: r.fecha_prometida, textoOriginal: r.texto_original,
         followUpFecha: r.fecha_prometida ? schedule.fechaFollowUp(r.fecha_prometida, cfg) : null,
         ficha: fichaDe(r),
+        // Cómo va el retiro en logística (si se mandó): estado, ruta, monto, RCP, error.
+        logistica: (r.llamada_key && logisticaMap.get(r.llamada_key)) || null,
         prometidaEl: r.fecha_llamada, llamadaId: r.llamada_id || null, montoAlPrometer: r.monto_al_prometer,
         agente: r.agente, origen: r.origen,
         proximoIntento: r.proximo_intento_at, seguimientoAt: r.seguimiento_at,
@@ -723,6 +731,16 @@ app.listen(PORT, async () => {
   const PROMESA_CRON = process.env.MOTOR_PROMESAS_CRON || '* * * * *';
   cron.schedule(PROMESA_CRON, () => promesas.correr().catch((e) => console.error('[cron promesas]', e.message)), opts);
   console.log(`  Promesas / follow up: ${PROMESA_CRON} (${history.TZ}) · follow up ${calls.followupEnabled ? 'ACTIVO' : 'no configurado (usa el principal)'}`);
+
+  // Retiros → logística: cada minuto manda los retiros nuevos o cambiados y
+  // cancela los que ya no van. Sin LOGISTICA_URL / LOGISTICA_TOKEN queda apagado.
+  if (retirosLogistica.configurado()) {
+    const RETIROS_CRON = process.env.RETIROS_LOGISTICA_CRON || '* * * * *';
+    cron.schedule(RETIROS_CRON, () => retirosLogistica.sincronizar().catch((e) => console.error('[cron retiros-logistica]', e.message)), opts);
+    console.log(`  Retiros a logística: ${RETIROS_CRON} (${history.TZ})${process.env.LOGISTICA_AVISO_TOKEN ? '' : ' · avisos de vuelta inactivos (falta LOGISTICA_AVISO_TOKEN)'}`);
+  } else {
+    console.log('  Retiros a logística: inactivo (faltan LOGISTICA_URL / LOGISTICA_TOKEN)');
+  }
 
   const st = await queue.status().catch(() => null);
   console.log(`  Llamadas: ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}`);

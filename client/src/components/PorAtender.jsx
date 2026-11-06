@@ -25,7 +25,10 @@ export function necesitanAlguien(clientes) {
     if (c.estadoCobro === 'escalar') {
       out.push({ c, motivo: `🙋 ${c.estadoDetalle || 'Varias promesas incumplidas'}`, desde: c.estadoAt });
     } else if (c.estadoCobro === 'dice_pago' && c.estadoAt && Date.parse(c.estadoAt) <= corte) {
-      out.push({ c, motivo: `💬 Dijo que pagó${c.estadoDetalle ? ` el ${fechaCorta(c.estadoDetalle)}` : ''} y sigue el vencido`, desde: c.estadoAt });
+      // El detalle es la fecha de la llamada, o una nota (retirado por logística).
+      const esFecha = /^\d{4}-\d{2}-\d{2}/.test(c.estadoDetalle || '');
+      const dijo = !c.estadoDetalle ? 'Dijo que pagó' : esFecha ? `Dijo que pagó el ${fechaCorta(c.estadoDetalle)}` : c.estadoDetalle;
+      out.push({ c, motivo: `💬 ${dijo} y sigue el vencido`, desde: c.estadoAt });
     }
   }
   return out.sort((a, b) => (b.c.deuda_vencida || 0) - (a.c.deuda_vencida || 0));
@@ -39,25 +42,73 @@ export function retiroTexto(p) {
   return `${fecha ? dia(fecha) : 'sin fecha'} · ${franja}`;
 }
 
-/** Promesas abiertas en las que el cliente pidió que pasen a buscar el pago, por día del retiro. */
+/**
+ * Promesas abiertas en las que el cliente pidió que pasen a buscar el pago, por día del retiro.
+ * Aparte, en `retirados`, los que logística retiró hoy (su promesa ya se cerró como
+ * "dice que pagó"): se ven para saber que se cobró, pero no cuentan como pendientes.
+ */
 export function agruparRetiros(promesas) {
   const hoy = ymdRD(new Date());
   const manana = ymdRD(new Date(Date.now() + 86400000));
-  const out = { hoy: [], manana: [], proximos: [] };
+  const out = { hoy: [], manana: [], proximos: [], retirados: [] };
   for (const p of promesas || []) {
-    if (!(p.estado === 'pendiente' || p.estado === 'en_seguimiento')) continue;
     if (!p.ficha || p.ficha.modalidad !== 'retiro') continue;
     const f = (p.ficha.retiro && p.ficha.retiro.fecha) || String(p.fechaPrometida || '').slice(0, 10);
     const item = { ...p, _retiroFecha: f };
+    if (!(p.estado === 'pendiente' || p.estado === 'en_seguimiento')) {
+      const lg = p.logistica;
+      const cuando = lg && (lg.atendidoEn || lg.actualizadoAt);
+      if (lg && lg.estado === 'retirado' && cuando && ymdRD(new Date(cuando)) === hoy) out.retirados.push(item);
+      continue;
+    }
     if (f <= hoy) out.hoy.push(item); else if (f === manana) out.manana.push(item); else out.proximos.push(item);
   }
   const orden = (a, b) => String(a._retiroFecha).localeCompare(String(b._retiroFecha))
     || String((a.ficha.retiro || {}).desde || '99').localeCompare(String((b.ficha.retiro || {}).desde || '99'));
-  out.hoy.sort(orden); out.manana.sort(orden); out.proximos.sort(orden);
+  out.hoy.sort(orden); out.manana.sort(orden); out.proximos.sort(orden); out.retirados.sort(orden);
   return out;
 }
 
-function Item({ nombre, prueba, monto, linea, cls, onClick, titulo, accion }) {
+const pesos = (cent) => `RD$ ${(cent / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+
+/**
+ * Cómo va el retiro en logística, para la pastilla: { txt, cls, tip } o null si
+ * no se ha mandado. Con error (no llegó, sin código) sale aparte el aviso.
+ */
+export function logisticaPill(lg) {
+  if (!lg || !lg.estado) return null;
+  const r = lg.ruta || {};
+  switch (lg.estado) {
+    case 'por_ubicar': return { txt: '📍 Por ubicar', cls: '', tip: 'Logística todavía no tiene la ubicación del cliente.' };
+    case 'por_asignar': return { txt: '⏳ Por asignar', cls: '', tip: lg.motivo || 'Esperando que logística lo meta en una ruta.' };
+    case 'en_ruta': {
+      const det = [r.referencia, r.repartidor].filter(Boolean).join(' · ');
+      return { txt: `🚚 En ruta${det ? ` ${det}` : ''}`, cls: 'ruta', tip: `En la ruta${r.referencia ? ` ${r.referencia}` : ''}${r.fecha ? ` del ${dia(r.fecha)}` : ''}${r.repartidor ? `, con ${r.repartidor}` : ''}.` };
+    }
+    case 'retirado': {
+      const det = [lg.montoCent != null ? pesos(lg.montoCent) : null, lg.rcp].filter(Boolean).join(' · ');
+      return { txt: `✅ Retirado${det ? ` ${det}` : ''}`, cls: 'ok', tip: `Logística retiró el pago${lg.atendidoEn ? ` el ${fechaCorta(lg.atendidoEn)}` : ''}. El cliente quedó en "dice que pagó": no se le llama.` };
+    }
+    case 'no_retirado': return { txt: `❌ No retirado${lg.motivo ? `: ${lg.motivo}` : ''}`, cls: 'mal', tip: lg.motivo || 'Logística pasó y no pudo retirar el pago.' };
+    case 'cancelado': return { txt: 'Cancelado', cls: '', tip: 'El retiro se canceló en logística.' };
+    default: return null;
+  }
+}
+
+/** Pastillas de logística de un retiro (estado + aviso si no llegó). */
+function LogisticaPills({ lg }) {
+  if (!lg) return null;
+  const e = logisticaPill(lg);
+  if (!e && !lg.error) return null;
+  return (
+    <span className="retiro-log">
+      {e && <span className={`estado-cobro retiro-log__pill ${e.cls ? `retiro-log__pill--${e.cls}` : ''}`} title={e.tip}>{e.txt}</span>}
+      {lg.error && <span className="estado-cobro retiro-log__pill retiro-log__pill--aviso" title={lg.error}>⚠ No llegó a logística</span>}
+    </span>
+  );
+}
+
+function Item({ nombre, prueba, monto, linea, extra, cls, onClick, titulo, accion }) {
   return (
     <div className={`asis-item ${cls || ''}`}>
       <button className="asis-item__main" onClick={onClick} title={titulo || 'Ir a este cliente en Clientes y llamadas'}>
@@ -66,6 +117,7 @@ function Item({ nombre, prueba, monto, linea, cls, onClick, titulo, accion }) {
           {monto != null && <span className="asis-item__num">{money(monto)}</span>}
         </span>
         <span className="asis-item__l2">{linea}</span>
+        {extra}
       </button>
       {accion}
     </div>
@@ -130,16 +182,17 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
           <div className="aten-col__body">
             {!prom && <div className="asis-empty">Cargando…</div>}
             {errRet && <div className="sched-err" style={{ padding: '8px 14px' }}>{errRet}</div>}
-            {prom && !nRet && <div className="asis-empty">Nadie pidió que pasen a retirar el pago. Aparecen aquí cuando el cliente lo pide en una llamada.</div>}
-            {[['hoy', 'Hoy'], ['manana', 'Mañana'], ['proximos', 'Próximos']].map(([k, lbl]) => ret[k].length > 0 && (
+            {prom && !nRet && !ret.retirados.length && <div className="asis-empty">Nadie pidió que pasen a retirar el pago. Aparecen aquí cuando el cliente lo pide en una llamada.</div>}
+            {[['hoy', 'Hoy'], ['manana', 'Mañana'], ['proximos', 'Próximos'], ['retirados', 'Retirados hoy']].map(([k, lbl]) => ret[k].length > 0 && (
               <div key={k}>
                 <div className="asis-sec">{lbl}</div>
                 {ret[k].map((p) => (
                   <Item key={p.id} nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''}
                     linea={`${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
+                    extra={<LogisticaPills lg={p.logistica} />}
                     titulo="Ver la llamada donde lo pidió (en Clientes y llamadas)"
                     onClick={() => ir(p.phone, { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })}
-                    accion={p.ficha.key && (
+                    accion={k !== 'retirados' && p.ficha.key && (
                       <button className="asis-item__accion" disabled={corrigiendo === p.id} onClick={() => noEsRetiro(p)}
                         title="La IA se equivocó: sacarlo de los retiros">
                         {corrigiendo === p.id ? '…' : 'No es retiro'}
@@ -149,7 +202,7 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
               </div>
             ))}
           </div>
-          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro". Si ya no debe, sale solo.</div>
+          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase, y se manda a logística. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro" (también se cancela en logística). Si ya no debe, sale solo.</div>
         </section>
       )}
     </div>

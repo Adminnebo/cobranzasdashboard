@@ -598,6 +598,26 @@ async function reabrir(id, por = null) {
   return { ...p, estado: 'pendiente' };
 }
 
+/**
+ * Logística retiró el pago (aviso "retirado"): lo mismo que cuando el cliente
+ * dice en una llamada que ya pagó. Se cierra su promesa abierta como
+ * 'dice_pago' (así el follow up no lo llama) y el cliente pasa a "dice que
+ * pagó" con la nota del retiro. Vuelve solo a la normalidad cuando su vencido
+ * baja a 0 (limpiarEstados), o lo vuelve a prender el equipo.
+ * Si ya estaba así con la misma nota (aviso repetido), no toca nada.
+ * @returns {boolean} si cambió algo
+ */
+async function dicePagoPorRetiro(phone, nota) {
+  const p = String(phone);
+  const abierta = (await abiertasPorTelefono()).get(p);
+  if (abierta) await cerrar(abierta, 'dice_pago', nota);
+  const actual = await clienteConfig.estadoDe(p);
+  if (actual && actual.estado === 'dice_pago' && actual.detalle === nota) return !!abierta;
+  await clienteConfig.entrarEstado(p, 'dice_pago', nota, 'sistema (logística)');
+  console.log(`[promesas] ${p}: ${nota}${abierta ? ` (promesa ${abierta.id} cerrada)` : ''}`);
+  return true;
+}
+
 /** Lista para la pestaña Promesas (más recientes primero). */
 async function lista(limit = 300) {
   const rows = await db.select(TABLE, `?select=*&order=created_at.desc&limit=${Math.min(1000, Math.max(1, limit))}`);
@@ -623,7 +643,7 @@ async function resumen() {
 
 module.exports = {
   limpiarEstados,
-  correr, resumen, lista, reabrir, cancelarPorCambioManual,
+  correr, resumen, lista, reabrir, cancelarPorCambioManual, dicePagoPorRetiro,
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,
   // puras (pruebas)
