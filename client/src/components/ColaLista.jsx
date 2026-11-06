@@ -7,9 +7,10 @@ import { horarioTexto } from './HorarioCliente';
 const ESTADO = {
   lista:             { label: 'Lista para salir', color: 'var(--good-ink)' },
   esperando_horario: { label: 'Esperando su horario', color: 'var(--warning)' },
+  esperando_cita:    { label: 'Esperando la hora que pidió', color: 'var(--series-1)' },
   fuera_de_horario:  { label: 'Fuera de horario', color: 'var(--text-muted)' },
 };
-const ORIGEN = { cron: 'automática del día', bulk: 'masiva', manual: 'a mano', seguimiento: 'motor de follow up' };
+const ORIGEN = { cron: 'automática del día', bulk: 'masiva', manual: 'a mano', seguimiento: 'motor de follow up', cita: 'hora que pidió' };
 
 const momento = (iso) => {
   if (!iso) return '—';
@@ -103,7 +104,12 @@ export default function ColaLista({ onClose, onChange }) {
                       <span className="pill" style={{ color: e.color }}>
                         <span className="pdot" style={{ background: e.color }} />{e.label}
                       </span>
-                      {it.horario && <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', marginTop: 3 }}>🕘 {horarioTexto(it.horario)}</div>}
+                      {it.cita && <div style={{ color: 'var(--series-1)', fontSize: '0.76rem', marginTop: 3 }}>📞 pidió {dia(it.cita.dia)} · {it.cita.desde}–{it.cita.hasta}</div>}
+                      {!it.cita && it.horario && <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', marginTop: 3 }}>🕘 {horarioTexto(it.horario)}</div>}
+                      {it.estado === 'lista' && it.disponible != null && it.disponible <= 60 && (
+                        <div style={{ color: 'var(--warning)', fontSize: '0.76rem', marginTop: 2 }} title="Por eso va antes que las que tienen más tiempo">⏱ le quedan {it.disponible} min hoy</div>
+                      )}
+                      {it.movida > 0 && it.detalle && <div style={{ color: 'var(--critical)', fontSize: '0.76rem', marginTop: 2, whiteSpace: 'normal', maxWidth: 260 }}>↪ {it.detalle}</div>}
                     </td>
                     <td className="num">{money(it.deuda_vencida)}</td>
                     <td style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>

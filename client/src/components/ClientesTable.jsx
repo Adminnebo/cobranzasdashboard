@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, setClientesHorario, setForzarFollowUp, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
+import { setClientesEnabled, setClientesHorario, setCitaCliente, setForzarFollowUp, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
 import ListsPanel from './ListsPanel';
 import ClientCalls from './ClientCalls';
 import HorarioCliente from './HorarioCliente';
+import CitaCliente from './CitaCliente';
 
 const sortValue = {
   name: (c) => (c.name || '').toLowerCase(),
@@ -223,6 +224,14 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
       `${phones.length} cliente(s) ${enabled ? 'activados' : 'desactivados'}.`);
 
   // Lanza el error al editor de horario para que lo muestre ahí mismo.
+  // Lanza el error al editor para que lo muestre ahí mismo.
+  const guardarCita = async (phone, at) => {
+    await setCitaCliente(phone, at);
+    setMsg({ type: 'ok', text: at ? 'Hora guardada: la próxima llamada sale a esa hora.' : 'Hora quitada: vuelve a su horario.' });
+    setQueueKey((k) => k + 1);
+    if (onChanged) onChanged();
+  };
+
   const guardarHorario = async (phones, horario) => {
     await setClientesHorario(phones, horario);
     setMsg({ type: 'ok', text: horario
@@ -641,6 +650,9 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                       {c.phone && c.horario && c.horario.length > 0 && (
                         <HorarioCliente variant="chip" horario={c.horario} origen={c.horarioOrigen} detalle={c.horarioDetalle} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
                       )}
+                      {c.phone && c.cita && c.cita.at && (
+                        <CitaCliente variant="chip" cita={c.cita} disabled={busy} onSave={(at) => guardarCita(c.phone, at)} />
+                      )}
                     </div>
                   </td>
                   <td style={{ fontVariantNumeric: 'tabular-nums', color: c.phone ? undefined : 'var(--text-muted)' }}>
@@ -693,6 +705,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                     {menu && menu.phone === c.phone && createPortal(
                       <div className="row-menu row-menu--fixed" style={menu.style}>
                         <HorarioCliente variant="menu" horario={c.horario} disabled={busy} onSave={(h) => guardarHorario([c.phone], h)} />
+                        <CitaCliente variant="menu" cita={c.cita} disabled={busy} onSave={(at) => guardarCita(c.phone, at)} />
                         {!c.ivr && (
                           <button className="row-menu__item" disabled={busy}
                             onClick={() => { setMenu(null); run(() => enqueueCalls([c.phone]), (r) => (r.encoladas ? 'En la cola: sale cuando le toque según el horario.' : 'Ya estaba en la cola.')); }}

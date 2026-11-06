@@ -190,5 +190,67 @@ async function setForzado(phone, forzar, updatedBy) {
   return { phone: p, forzar: !!forzar };
 }
 
+
+// ── Fase B: hora pedida (cita) y "necesita a una persona" por la cola (sql/013) ──
+let faltan013 = false;
+const esFalta013 = (err) => /cita_|atencion_|column|42703|PGRST204/i.test(String(err && err.message));
+function avisarFalta013(err) {
+  if (!faltan013) console.warn('[clientes] faltan las columnas de sql/013 (hora pedida / atención):', err.message);
+  faltan013 = true;
+}
+
+/** Map<phone, {at, texto, origen, movida}> de los clientes con una hora pedida. */
+async function getCitaMap() {
+  const map = new Map();
+  if (faltan013 || !db.dbEnabled) return map;
+  try {
+    const rows = await db.select(TABLE, '?select=phone,cita_at,cita_texto,cita_origen,cita_movida&cita_at=not.is.null');
+    for (const r of rows || []) map.set(String(r.phone), { at: r.cita_at, texto: r.cita_texto || null, origen: r.cita_origen || null, movida: r.cita_movida || 0 });
+  } catch (err) {
+    // Nunca tumba a quien lo pide (la lista de clientes, la cola): sin datos, sin citas.
+    if (esFalta013(err)) avisarFalta013(err); else console.warn('[clientes] hora pedida / atención no disponible:', err.message);
+  }
+  return map;
+}
+
+/** Pone (o mueve) la hora pedida de un cliente. at = ISO; null la borra. */
+async function setCita(phone, at, { texto = null, origen = 'manual', movida = 0, updatedBy = null } = {}) {
+  if (faltan013) return false;
+  try {
+    await db.upsert(TABLE, {
+      phone: String(phone), cita_at: at || null, cita_texto: at ? texto : null, cita_origen: at ? origen : null,
+      cita_movida: at ? movida : 0, updated_at: new Date().toISOString(), updated_by: updatedBy || null,
+    }, 'phone');
+    return true;
+  } catch (err) { if (esFalta013(err)) { avisarFalta013(err); return false; } throw err; }
+}
+
+/** Map<phone, {motivo, at}> de los clientes marcados para que los atienda una persona. */
+async function getAtencionMap() {
+  const map = new Map();
+  if (faltan013 || !db.dbEnabled) return map;
+  try {
+    const rows = await db.select(TABLE, '?select=phone,atencion_motivo,atencion_at&atencion_motivo=not.is.null');
+    for (const r of rows || []) map.set(String(r.phone), { motivo: r.atencion_motivo, at: r.atencion_at });
+  } catch (err) {
+    // Nunca tumba a quien lo pide (la lista de clientes, la cola): sin datos, sin citas.
+    if (esFalta013(err)) avisarFalta013(err); else console.warn('[clientes] hora pedida / atención no disponible:', err.message);
+  }
+  return map;
+}
+
+/** Marca (o con motivo null, desmarca) a un cliente para 🙋 Por atender. No lo apaga. */
+async function setAtencion(phone, motivo, updatedBy = null) {
+  if (faltan013) return false;
+  try {
+    await db.upsert(TABLE, {
+      phone: String(phone), atencion_motivo: motivo || null, atencion_at: motivo ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(), updated_by: updatedBy || null,
+    }, 'phone');
+    return true;
+  } catch (err) { if (esFalta013(err)) { avisarFalta013(err); return false; } throw err; }
+}
+
 module.exports = {
+  getCitaMap, setCita, getAtencionMap, setAtencion,
   getHorarioInfoMap, getForzadosSet, setForzado, getHorarioMap, setHorario, getEnabledMap, getEnabledPhones, setEnabled, getEstadoMap, estadoDe, entrarEstado, salirEstado };

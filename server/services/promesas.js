@@ -483,6 +483,45 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
 }
 
 /**
+ * Hora pedida ("llámenme mañana a las 3"): ese día tiene que haber una llamada
+ * en la cola para ese cliente, que la cola suelta a esa hora. Si tiene una
+ * promesa abierta es su follow up (si todavía no había empezado, empieza ese día
+ * su ventana); si no, una llamada del agente principal (solo si está prendido).
+ * Si ya tenía una llamada en la cola, no se agrega otra: la cola le pone la hora.
+ */
+async function asegurarCitas(clientesPorTel, cfg, { ahora: ahoraFecha = new Date() } = {}) {
+  const cuenta = {};
+  const citas = await clienteConfig.getCitaMap();
+  if (!citas.size) return cuenta;
+  const hoy = ymdInTz(ahoraFecha);
+  let abiertas = null;
+  let prendidos = null;
+  for (const [phone, cita] of citas) {
+    if (ymdInTz(new Date(cita.at)) !== hoy) continue;
+    const c = clientesPorTel.get(phone);
+    if (!c || ((c.deuda_vencida || 0) <= 0 && !c._forzar)) continue;
+    try {
+      const enCola = await db.select('llamada_cola', `?select=id&phone=eq.${encodeURIComponent(phone)}&estado=eq.pendiente&limit=1`);
+      if (enCola && enCola.length) continue;
+      if (!abiertas) abiertas = await abiertasPorTelefono();
+      const p = abiertas.get(phone);
+      if (p) {
+        const extra = p.ventana_desde ? {} : { ventana_desde: hoy, ventana_hasta: schedule.finVentana(hoy, cfg), reintentos: 0 };
+        if (await encolarFollowUp(p, c, extra)) cuenta.citas_follow_up = (cuenta.citas_follow_up || 0) + 1;
+      } else {
+        if (!prendidos) prendidos = await clienteConfig.getEnabledMap();
+        if (!prendidos.get(phone)) continue;
+        const r = await queue.enqueue([c], 'cita', null, 'principal');
+        if (r.encoladas) cuenta.citas_principal = (cuenta.citas_principal || 0) + 1;
+      }
+    } catch (err) {
+      console.error(`[promesas] hora pedida de ${phone} falló:`, err.message);
+    }
+  }
+  return cuenta;
+}
+
+/**
  * Estados que quedan colgados sin promesa abierta:
  *  - el cliente desapareció de la cartera (pagó todo): vuelve a la normalidad;
  *  - "dice que pagó" y su vencido ya está en 0: era cierto, vuelve a la
@@ -548,6 +587,11 @@ async function correr({ fresco = false } = {}) {
     const carteraOk = carteraCompleta((data.clientes || []).filter((c) => c.phone).length);
     const r2 = await revisarAbiertas(clientesPorTel, cfg, { carteraOk });
     Object.assign(r2, await limpiarEstados(clientesPorTel, { carteraOk }));
+    // Fase B: llamadas a la hora que pidió el cliente y ventanas cortas que no alcanzaron.
+    try { Object.assign(r2, await asegurarCitas(clientesPorTel, cfg)); }
+    catch (err) { console.error('[promesas] horas pedidas falló:', err.message); }
+    try { Object.assign(r2, await queue.revisarPerdidas()); }
+    catch (err) { console.error('[cola] revisar ventanas falló:', err.message); }
     // Ficha de cada llamada (retiro, hora pedida, horario que se repite). Aparte:
     // si la IA falla, las promesas siguen igual y la ficha se reintenta luego.
     try { await fichas.procesar(llamadas, cfg); }
@@ -642,7 +686,7 @@ async function resumen() {
 }
 
 module.exports = {
-  limpiarEstados,
+  limpiarEstados, asegurarCitas,
   correr, resumen, lista, reabrir, cancelarPorCambioManual, dicePagoPorRetiro,
   // internas (pruebas con base en memoria)
   procesarLlamadas, revisarAbiertas,

@@ -185,6 +185,32 @@ async function aplicarDisponibilidad(phone, ficha, ll, cfg, info) {
 }
 
 /**
+ * Hora pedida ("llámenme mañana a las 3"): se guarda como cita del cliente y la
+ * cola lo llama ese día a esa hora (por encima de su horario y del general).
+ * Sin fecha: hoy si esa hora todavía no pasó, si no el siguiente día hábil.
+ * Solo dentro del rango permitido para horarios de cliente y en el futuro.
+ * @returns {boolean} si la guardó
+ */
+async function aplicarCita(phone, ficha, ll, cfg, ahora = new Date()) {
+  const l = ficha.llamar;
+  if (!l || !l.hora) return false;
+  const desde = cfg.horarioClienteDesde || schedule.DEFAULT.horarioClienteDesde;
+  const hasta = cfg.horarioClienteHasta || schedule.DEFAULT.horarioClienteHasta;
+  if (l.hora < desde || l.hora >= hasta) return false;
+  const diaLlamada = schedule.ymdInTz(new Date(ll.created_at || ahora));
+  let fecha = l.fecha;
+  if (!fecha) {
+    const horaLlamada = schedule.partsInTz(new Date(ll.created_at || ahora)).mins;
+    fecha = toMins(l.hora) > horaLlamada ? diaLlamada : schedule.sumarHabiles(diaLlamada, 1);
+  }
+  const at = new Date(`${fecha}T${l.hora}:00-04:00`); // RD: UTC−4 todo el año
+  if (Number.isNaN(at.getTime()) || at.getTime() <= ahora.getTime()) return false;
+  return clienteConfig.setCita(String(phone), at.toISOString(), {
+    texto: l.texto || null, origen: 'ia', updatedBy: 'sistema (lo pidió el cliente)',
+  });
+}
+
+/**
  * Saca la ficha de las llamadas contestadas que todavía no la tienen.
  * @param llamadas  las de la cartera + las de prueba (de getCachedData)
  * @param opts.extraer  para pruebas: (items, cfg) => Map<id, raw>
@@ -220,7 +246,7 @@ async function procesar(llamadas, cfg, { extraer = extraerConIA } = {}) {
   if (!nuevas.length) return { nuevas: 0 };
 
   const info = await clienteConfig.getHorarioInfoMap();
-  const cuenta = { nuevas: 0, retiros: 0, llamar: 0, horarios: 0 };
+  const cuenta = { nuevas: 0, retiros: 0, llamar: 0, horarios: 0, citas: 0 };
   for (let i = 0; i < nuevas.length; i += LOTE) {
     const lote = nuevas.slice(i, i + LOTE);
     const items = lote.map((l) => {
@@ -245,6 +271,8 @@ async function procesar(llamadas, cfg, { extraer = extraerConIA } = {}) {
       let horarioAplicado = false;
       try { horarioAplicado = await aplicarDisponibilidad(ll.phone, ficha, ll, cfg, info); }
       catch (err) { console.error(`[fichas] ${ll.phone}: no se pudo ajustar el horario:`, err.message); }
+      try { if (await aplicarCita(ll.phone, ficha, ll, cfg)) cuenta.citas++; }
+      catch (err) { console.error(`[fichas] ${ll.phone}: no se pudo guardar la hora pedida:`, err.message); }
       await db.upsert(TABLE, {
         llamada_key: key,
         phone: String(ll.phone),
@@ -286,4 +314,4 @@ async function mapaReciente(dias = 45) {
   } catch (err) { return new Map(); }
 }
 
-module.exports = { procesar, normalizarFicha, citaDelCliente, marcarNoRetiro, mapaReciente, llamadaKey, TABLE };
+module.exports = { aplicarCita, procesar, normalizarFicha, citaDelCliente, marcarNoRetiro, mapaReciente, llamadaKey, TABLE };

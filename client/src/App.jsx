@@ -343,7 +343,7 @@ export default function App() {
       {tab === 'correo' && verCorreo && correoEmbed && <CorreoPanel embed={correoEmbed} />}
 
       {tab === 'atender' && puede('cobranzas.clientes') && (
-        <PorAtender clientes={data.clientes} prom={prom} verRetiros={verRetiros} onCambio={cargarProm}
+        <PorAtender clientes={data.clientes} prom={prom} verRetiros={verRetiros} onCambio={cargarProm} onRecargar={reloadData}
           onPick={(phone, llamada) => { setTab('clientes'); setFoco({ phone, llamada, t: Date.now() }); }} />
       )}
 
