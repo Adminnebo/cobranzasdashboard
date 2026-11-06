@@ -70,6 +70,9 @@ export const clearChatHistory = () => del('/api/ask/history');
 export const setClientesEnabled = (phones, enabled) => patch('/api/clientes/enabled', { phones, enabled });
 export const setForzarFollowUp = (phone, forzar) => put('/api/clientes/forzar-follow-up', { phone, forzar });
 export const setClientesHorario = (phones, horario) => put('/api/clientes/horario', { phones, horario });
+// Hora en que el cliente pidió que lo llamen (null la quita) y "Listo" de 🙋 Por atender.
+export const setCitaCliente = (phone, at) => put('/api/clientes/cita', { phone, at });
+export const atencionListo = (phone) => post('/api/clientes/atencion/listo', { phone });
 export const triggerCalls = (phones, origen = 'manual') => post('/api/calls/trigger', { phones, origen });
 // Encola sin llamar al instante: espera turno y respeta el horario (general o propio).
 export const enqueueCalls = (phones) => post('/api/calls/trigger', { phones, origen: 'manual', encolar: true });

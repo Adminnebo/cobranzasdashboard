@@ -39,6 +39,10 @@ const DEFAULT = {
   fuReintentosDia1: 1,       // reintentos el primer día si no contesta (además de la 1.ª llamada)
   fuSinFechaMismoDia: false, // si contesta sin fecha el primer día: ¿reintenta ese día? (no: al día siguiente)
   fuCadaDias: 1,             // después del primer día: una llamada cada N días
+  // Fase B: hora que pide el cliente ("llámenme mañana a las 3") y llamadas que
+  // no alcanzan a salir en una ventana corta (horario propio o esa hora).
+  citaVentanaMin: 30,        // minutos desde la hora pedida en los que puede salir la llamada
+  maxMovidas: 2,             // días que se pasa al siguiente antes de ir a 🙋 Por atender
   // Horario propio de un cliente: puede salirse del horario general, pero
   // nunca de este rango (que nadie lo llame a las 6 de la mañana).
   horarioClienteDesde: '08:00',
@@ -157,6 +161,8 @@ async function get(force = false) {
         fuReintentosDia1: entero(row.fu_reintentos_dia1, DEFAULT.fuReintentosDia1, 0, 6),
         fuSinFechaMismoDia: row.fu_sin_fecha_mismo_dia == null ? DEFAULT.fuSinFechaMismoDia : !!row.fu_sin_fecha_mismo_dia,
         fuCadaDias: entero(row.fu_cada_dias, DEFAULT.fuCadaDias, 1, 7),
+        citaVentanaMin: entero(row.cita_ventana_min, DEFAULT.citaVentanaMin, 10, 180),
+        maxMovidas: entero(row.max_movidas, DEFAULT.maxMovidas, 0, 10),
         tz: TZ,
       }
     : { ...DEFAULT, lastEnqueueDate: null, tz: TZ };
@@ -216,6 +222,52 @@ function abiertoPara(cfg, horario, d = new Date()) {
   });
 }
 
+/** Bloques que aplican HOY (por día de la semana) de una lista, en minutos. */
+function bloquesDeHoy(cfg, bloques, d, { usaDiasGenerales = true } = {}) {
+  const p = partsInTz(d);
+  const dia = DIA_NUM[p.weekday];
+  const finde = dia >= 6;
+  return (bloques || [])
+    .filter((b) => (b.dias ? b.dias.includes(dia) : !(usaDiasGenerales && cfg.weekdaysOnly && finde)))
+    .map((b) => ({ s: toMins(b.start), e: toMins(b.end) }))
+    .filter((b) => b.e > b.s);
+}
+
+/**
+ * Ventana de una llamada de la cola en este momento. Manda, en este orden:
+ *  1. la hora que pidió el cliente (cita): solo ese día, de esa hora a +N min,
+ *     aunque esté fuera de su horario propio y del general;
+ *  2. su horario propio;
+ *  3. el horario general.
+ * El interruptor de llamadas automáticas apaga todo.
+ * @param ctx { horario, cita: ISO|null }
+ * @returns { tipo: 'cita'|'propio'|'general', abierto, disponible: minutos que le
+ *   quedan hoy para salir (menos = más urgente), espera?: 'cita' si su hora es más tarde o otro día,
+ *   desde?, hasta? (HH:MM de la ventana de la cita) }
+ */
+function ventanaLlamada(cfg, { horario = null, cita = null } = {}, d = new Date()) {
+  const ahora = partsInTz(d).mins;
+  const hoy = ymdInTz(d);
+  if (cita) {
+    const c = new Date(cita);
+    const dia = ymdInTz(c);
+    if (dia >= hoy) {
+      const ini = partsInTz(c).mins;
+      const fin = Math.min(ini + ((cfg && cfg.citaVentanaMin) || DEFAULT.citaVentanaMin), 24 * 60);
+      const rango = { desde: minsAHhmm(ini), hasta: minsAHhmm(Math.min(fin, 24 * 60 - 1)), dia };
+      if (dia > hoy || ahora < ini) return { tipo: 'cita', abierto: false, disponible: null, espera: 'cita', ...rango };
+      const abierto = !!(cfg && cfg.enabled) && ahora < fin;
+      return { tipo: 'cita', abierto, disponible: abierto ? fin - ahora : 0, ...rango };
+    }
+    // Una cita de un día que ya pasó no cuenta (la revisión de perdidas la mueve o la borra).
+  }
+  const propio = bloquesCliente(cfg, horario);
+  const bloques = propio ? bloquesDeHoy(cfg, propio, d) : bloquesDeHoy(cfg, (cfg && cfg.blocks) || [], d, { usaDiasGenerales: true });
+  const abierto = propio ? abiertoPara(cfg, horario, d) : inWindow(cfg, d);
+  const disponible = bloques.reduce((s, b) => s + Math.max(0, b.e - Math.max(b.s, ahora)), 0);
+  return { tipo: propio ? 'propio' : 'general', abierto, disponible: cfg && cfg.enabled ? disponible : 0 };
+}
+
 /**
  * Valida un horario propio que viene de la UI. Devuelve los bloques limpios
  * o null (sin horario propio). Lanza un error con status 400 si algo no cuadra.
@@ -272,6 +324,9 @@ async function set(patch, by) {
   if ('fuReintentosDia1' in patch) rango.fu_reintentos_dia1 = entero(next.fuReintentosDia1, DEFAULT.fuReintentosDia1, 0, 6);
   if ('fuSinFechaMismoDia' in patch) rango.fu_sin_fecha_mismo_dia = !!next.fuSinFechaMismoDia;
   if ('fuCadaDias' in patch) rango.fu_cada_dias = entero(next.fuCadaDias, DEFAULT.fuCadaDias, 1, 7);
+  // Fase B (sql/013): solo si vienen.
+  if ('citaVentanaMin' in patch) rango.cita_ventana_min = entero(next.citaVentanaMin, DEFAULT.citaVentanaMin, 10, 180);
+  if ('maxMovidas' in patch) rango.max_movidas = entero(next.maxMovidas, DEFAULT.maxMovidas, 0, 10);
   await db.upsert(TABLE, {
     id: 1,
     ...rango,
@@ -296,4 +351,4 @@ async function markEnqueued() {
   cache = null;
 }
 
-module.exports = { get, set, inWindow, abiertoPara, bloquesCliente, validarHorarioCliente, markEnqueued, ymdInTz, partsInTz, sumarHabiles, sumarDias, finVentana, fechaFollowUp, TZ, DEFAULT };
+module.exports = { get, set, inWindow, abiertoPara, bloquesCliente, validarHorarioCliente, markEnqueued, ymdInTz, partsInTz, sumarHabiles, sumarDias, finVentana, fechaFollowUp, ventanaLlamada, bloquesDeHoy, toMins, minsAHhmm, TZ, DEFAULT };

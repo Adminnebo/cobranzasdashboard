@@ -134,32 +134,119 @@ async function autoEnqueueEnabled() {
  * @param rows     pendientes de llamada_cola
  * @param horarios Map<phone, bloques> (cliente_config.horario)
  */
-function ordenCola(rows, horarios, cfg, d = new Date()) {
-  const general = schedule.inWindow(cfg, d);
+function ordenCola(rows, horarios, cfg, d = new Date(), citas = new Map()) {
   const items = (rows || []).map((r) => {
-    const h = horarios.get(String(r.phone));
+    const phone = String(r.phone);
+    const h = horarios.get(phone);
+    const cita = citas.get(phone) || null;
+    const v = schedule.ventanaLlamada(cfg, { horario: h, cita: cita && cita.at }, d);
     const propio = (h && schedule.bloquesCliente(cfg, h)) || null;
-    const abierto = propio ? schedule.abiertoPara(cfg, h, d) : general;
-    return { r, propio, abierto };
+    return { r, propio, cita, ...v };
   });
+  // Las que pueden salir ahora primero; entre ellas, la que menos tiempo le queda
+  // hoy (una ventana de 10 min antes que alguien con todo el día); luego follow
+  // ups; luego orden de llegada.
+  const disp = (x) => (x.disponible == null ? Infinity : x.disponible);
   items.sort((a, b) =>
     (b.abierto - a.abierto)
-    || (!!b.propio - !!a.propio)
+    || (disp(a) - disp(b))
     || ((b.r.agente === 'seguimiento') - (a.r.agente === 'seguimiento'))
     || String(a.r.created_at).localeCompare(String(b.r.created_at)));
   return items;
 }
 
-function elegirSiguiente(rows, horarios, cfg, d = new Date()) {
-  const [primero] = ordenCola(rows, horarios, cfg, d);
+function elegirSiguiente(rows, horarios, cfg, d = new Date(), citas = new Map()) {
+  const [primero] = ordenCola(rows, horarios, cfg, d, citas);
   return primero && primero.abierto ? primero.r : null;
 }
 
-/** ¿Hay alguna ventana abierta ahora (la general o la de algún cliente)? */
-function algunaAbierta(cfg, horarios, d = new Date()) {
+/** ¿Hay alguna ventana abierta ahora (la general, la de algún cliente o una hora pedida)? */
+function algunaAbierta(cfg, horarios, d = new Date(), citas = new Map()) {
   if (schedule.inWindow(cfg, d)) return true;
   for (const h of horarios.values()) if (schedule.bloquesCliente(cfg, h) && schedule.abiertoPara(cfg, h, d)) return true;
+  for (const c of citas.values()) if (schedule.ventanaLlamada(cfg, { cita: c.at }, d).abierto) return true;
   return false;
+}
+
+/**
+ * Llamadas que no alcanzaron a salir en su ventana corta de hoy (su horario
+ * propio o la hora que pidió). Se pasan al siguiente día con el motivo a la
+ * vista; después de maxMovidas veces se quitan de la cola y el cliente va a
+ * 🙋 Por atender. El horario general no cuenta: esas siguen solas mañana.
+ * Corre cada minuto desde el motor; una fila se cuenta una sola vez por día.
+ */
+let faltaMovida = false; // sql/013 sin correr: no insistir cada minuto
+async function revisarPerdidas(ahora = new Date()) {
+  if (faltaMovida) return {};
+  const cfg = await schedule.get();
+  if (!cfg.enabled) return {};
+  const rows = (await db.select(TABLE, '?select=*&estado=eq.pendiente')) || [];
+  const citas = await clienteConfig.getCitaMap();
+  const horarios = await clienteConfig.getHorarioMap();
+  const hoy = schedule.ymdInTz(ahora);
+  const min = schedule.partsInTz(ahora).mins;
+  const diaTxt = new Date(`${hoy}T12:00:00Z`).toLocaleDateString('es-DO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const cuenta = {};
+  const conFila = new Set();
+  for (const r of rows) {
+    const phone = String(r.phone);
+    conFila.add(phone);
+    if (r.movida_dia && String(r.movida_dia).slice(0, 10) === hoy) continue;
+    const cita = citas.get(phone);
+    let fin = null; let desc = null; let esCita = false;
+    if (cita && schedule.ymdInTz(new Date(cita.at)) === hoy) {
+      const v = schedule.ventanaLlamada(cfg, { cita: cita.at }, ahora);
+      fin = schedule.toMins(v.desde) + cfg.citaVentanaMin; desc = `la hora que pidió (${v.desde}–${v.hasta})`; esCita = true;
+    } else if (!cita || schedule.ymdInTz(new Date(cita.at)) < hoy) {
+      const propio = schedule.bloquesCliente(cfg, horarios.get(phone));
+      const deHoy = propio ? schedule.bloquesDeHoy(cfg, propio, ahora) : [];
+      if (deHoy.length) {
+        fin = Math.max(...deHoy.map((b) => b.e));
+        desc = `su horario (${deHoy.map((b) => `${schedule.minsAHhmm(b.s)}–${schedule.minsAHhmm(b.e)}`).join(', ')})`;
+      }
+    }
+    if (fin == null || min < fin) continue;
+    // Entró a la cola después de que cerró su ventana: no la perdió, la espera.
+    const creada = new Date(r.created_at);
+    if (schedule.ymdInTz(creada) === hoy && schedule.partsInTz(creada).mins >= fin) continue;
+    const movida = (r.movida || 0) + 1;
+    try {
+      if (movida > cfg.maxMovidas) {
+        const motivo = `No se pudo llamar en ${desc}: ${movida} días seguidos sin alcanzar a salir`;
+        await db.update(TABLE, `?id=eq.${r.id}`, { estado: 'cancelada', detalle: motivo, movida, movida_dia: hoy, enviada_at: new Date().toISOString() });
+        await clienteConfig.setAtencion(phone, motivo, 'sistema (cola)');
+        if (esCita) await clienteConfig.setCita(phone, null, { updatedBy: 'sistema (cola)' });
+        cuenta.a_persona = (cuenta.a_persona || 0) + 1;
+        console.log(`[cola] 🙋 ${phone}: ${motivo}`);
+      } else {
+        const tope = cfg.maxMovidas ? ` (${movida} de ${cfg.maxMovidas})` : '';
+        await db.update(TABLE, `?id=eq.${r.id}`, { movida, movida_dia: hoy, detalle: `No alcanzó a salir en ${desc} el ${diaTxt}: pasa al siguiente día${tope}` });
+        if (esCita) {
+          // La hora pedida se mueve al siguiente día hábil, a la misma hora.
+          const sig = schedule.sumarHabiles(hoy, 1);
+          const nueva = new Date(new Date(cita.at).getTime() + (Date.parse(`${sig}T12:00:00Z`) - Date.parse(`${hoy}T12:00:00Z`)));
+          await clienteConfig.setCita(phone, nueva.toISOString(), { texto: cita.texto, origen: cita.origen, movida, updatedBy: 'sistema (cola)' });
+        }
+        cuenta.movidas = (cuenta.movidas || 0) + 1;
+        console.log(`[cola] ↪ ${phone}: no alcanzó ${desc}, pasa al siguiente día${tope}`);
+      }
+    } catch (err) {
+      if (/movida|column|42703|PGRST204/i.test(err.message)) {
+        faltaMovida = true;
+        console.warn('[cola] faltan las columnas de sql/013: no se revisan las ventanas cortas perdidas');
+        return cuenta;
+      }
+      console.error(`[cola] revisar ventana de ${phone} falló:`, err.message);
+    }
+  }
+  // Horas pedidas de días que ya pasaron sin ninguna llamada en cola: se borran.
+  for (const [phone, c] of citas) {
+    if (!conFila.has(phone) && schedule.ymdInTz(new Date(c.at)) < hoy) {
+      await clienteConfig.setCita(phone, null, { updatedBy: 'sistema (cola)' }).catch(() => {});
+      cuenta.citas_vencidas = (cuenta.citas_vencidas || 0) + 1;
+    }
+  }
+  return cuenta;
 }
 
 /**
@@ -188,8 +275,9 @@ async function tick() {
   const cfg = await schedule.get();
   if (!cfg.enabled) return;
   const horarios = await clienteConfig.getHorarioMap();
-  // Fuera del horario general y de todos los horarios propios: pausa.
-  if (!algunaAbierta(cfg, horarios)) return;
+  const citas = await clienteConfig.getCitaMap();
+  // Fuera del horario general, de todos los horarios propios y de toda hora pedida: pausa.
+  if (!algunaAbierta(cfg, horarios, new Date(), citas)) return;
 
   corriendo = true;
   try {
@@ -210,9 +298,9 @@ async function tick() {
       if (Date.now() - lastLaunchAt < RATE_MS) return;
     }
 
-    // Horario propio abierto > follow ups > orden de llegada (ver elegirSiguiente).
+    // Abiertas ahora, la de menos tiempo disponible primero (ver ordenCola).
     const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=created_at.asc');
-    const item = elegirSiguiente(rows, horarios, cfg);
+    const item = elegirSiguiente(rows, horarios, cfg, new Date(), citas);
     if (!item) return;
     lastLaunchAt = Date.now();
 
@@ -251,6 +339,9 @@ async function tick() {
     try {
       await calls.triggerOne(cliente, agente);
       await marcar(item.id, 'enviada', null);
+      // Si salió por la hora que pidió, esa hora ya se usó.
+      const cita = citas.get(String(item.phone));
+      if (cita && schedule.ymdInTz(new Date(cita.at)) <= schedule.ymdInTz()) await clienteConfig.setCita(item.phone, null, { updatedBy: 'sistema (cola)' }).catch(() => {});
       await calls.logDisparo({ phone: item.phone, nombre: item.nombre, origen: item.origen, estado: 'ok', disparado_por: item.encolada_por });
       console.log(`[cola] ✅ ${item.phone} (${item.nombre || 's/n'}) · agente: ${agente}`);
     } catch (err) {
@@ -283,9 +374,10 @@ async function status() {
   const ultimas = hoy || [];
   const cfg = await schedule.get();
   const horarios = await clienteConfig.getHorarioMap();
+  const citas = await clienteConfig.getCitaMap();
   // Consulta las llamadas activas ahora (si VAPI está configurado).
   const activas = vapi.vapiEnabled ? await vapi.activeCalls().catch(() => null) : null;
-  const sig = elegirSiguiente(pendientes, horarios, cfg);
+  const sig = elegirSiguiente(pendientes, horarios, cfg, new Date(), citas);
   // En cola con horario propio cerrado ahora: esperan su ventana.
   const esperandoHorario = pendientes.filter((r) => {
     const h = horarios.get(String(r.phone));
@@ -320,8 +412,9 @@ async function lista(limit = 500) {
   const rows = await db.select(TABLE, '?select=*&estado=eq.pendiente&order=created_at.asc');
   const cfg = await schedule.get();
   const horarios = await clienteConfig.getHorarioMap();
-  const orden = ordenCola(rows, horarios, cfg);
-  const items = orden.slice(0, Math.max(1, limit)).map(({ r, propio, abierto }, i) => ({
+  const citas = await clienteConfig.getCitaMap();
+  const orden = ordenCola(rows, horarios, cfg, new Date(), citas);
+  const items = orden.slice(0, Math.max(1, limit)).map(({ r, propio, abierto, tipo, disponible, espera, desde, hasta, dia }, i) => ({
     id: r.id,
     pos: i + 1,
     phone: r.phone,
@@ -334,7 +427,11 @@ async function lista(limit = 500) {
     created_at: r.created_at,
     fecha_prometida: r.fecha_prometida || null,
     horario: propio,
-    estado: !cfg.enabled ? 'fuera_de_horario' : abierto ? 'lista' : propio ? 'esperando_horario' : 'fuera_de_horario',
+    cita: tipo === 'cita' ? { dia, desde, hasta } : null,
+    disponible: abierto ? disponible : null,
+    movida: r.movida || 0,
+    detalle: r.movida ? r.detalle : null,
+    estado: !cfg.enabled ? 'fuera_de_horario' : abierto ? 'lista' : espera === 'cita' ? 'esperando_cita' : propio ? 'esperando_horario' : 'fuera_de_horario',
   }));
   return { total: orden.length, items, horario: horarioTexto(cfg), enabled: cfg.enabled };
 }
@@ -358,4 +455,4 @@ async function cancelarTodo() {
   return { canceladas: n };
 }
 
-module.exports = { enqueue, tick, decidirAlMarcar, status, lista, quitar, cancelarTodo, autoEnqueueEnabled, ordenCola, elegirSiguiente, algunaAbierta, TZ };
+module.exports = { enqueue, tick, decidirAlMarcar, revisarPerdidas, status, lista, quitar, cancelarTodo, autoEnqueueEnabled, ordenCola, elegirSiguiente, algunaAbierta, TZ };

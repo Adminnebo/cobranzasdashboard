@@ -144,6 +144,14 @@ app.get('/api/data', async (req, res) => {
     try { estadoMap = await clienteConfig.getEstadoMap(); } catch (e) { /* sin estados */ }
     const horarioInfo = await clienteConfig.getHorarioInfoMap();
     const horarioMap = new Map([...horarioInfo].map(([k, v]) => [k, v.horario]));
+    const [citaMap, atencionMap] = await Promise.all([clienteConfig.getCitaMap(), clienteConfig.getAtencionMap()]);
+    const faseB = (phone) => {
+      const ci = citaMap.get(phone); const at = atencionMap.get(phone);
+      return {
+        cita: ci ? { at: ci.at, texto: ci.texto, origen: ci.origen, movida: ci.movida } : null,
+        atencionMotivo: at ? at.motivo : null, atencionAt: at ? at.at : null,
+      };
+    };
     const forzados = superAdmin ? await clienteConfig.getForzadosSet() : new Set();
     // Última llamada de cada cliente (para mostrar su status en la tabla).
     const ultimaPorTel = new Map();
@@ -170,6 +178,7 @@ app.get('/api/data', async (req, res) => {
         horario: horarioMap.get(c.phone) || null,
         horarioOrigen: (horarioInfo.get(c.phone) || {}).origen || null,
         horarioDetalle: (horarioInfo.get(c.phone) || {}).detalle || null,
+        ...faseB(c.phone),
         forzarFollowUp: forzados.has(c.phone),
         ultimaLlamada: ll
           ? {
@@ -201,6 +210,7 @@ app.get('/api/data', async (req, res) => {
           horario: horarioMap.get(c.phone) || null,
           horarioOrigen: (horarioInfo.get(c.phone) || {}).origen || null,
           horarioDetalle: (horarioInfo.get(c.phone) || {}).detalle || null,
+          ...faseB(c.phone),
           ultimaLlamada: ll
             ? { fecha: ll.created_at, intencion: ll.intencion_pago, fechaPago: ll.fecha_pago || null, notas: ll.notas || null,
                 transcripcion: ll.transcripcion || null, grabacion: ll.grabacion || null, agente: ll.agente, resultado: ll.resultado || null }
@@ -256,6 +266,46 @@ app.put('/api/clientes/horario', requirePermission('cobranzas.cliente_toggle'), 
     res.json(await clienteConfig.setHorario(phones, limpio, req.user ? req.user.email : null, { origen: 'manual' }));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
+// Hora pedida a mano: { phone, at: ISO | null }. Manda sobre su horario y el general,
+// solo para la próxima llamada. Tiene que ser a futuro y dentro del rango de horarios de cliente.
+app.put('/api/clientes/cita', requirePermission('cobranzas.cliente_toggle'), async (req, res) => {
+  try {
+    const { phone, at } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'Falta phone' });
+    const por = req.user ? req.user.email : null;
+    if (!at) {
+      if (!(await clienteConfig.setCita(String(phone), null, { updatedBy: por }))) return res.status(409).json({ error: 'Falta correr sql/013' });
+      return res.json({ ok: true, cita: null });
+    }
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'Fecha u hora inválida' });
+    if (d.getTime() <= Date.now()) return res.status(400).json({ error: 'La hora tiene que ser a futuro' });
+    const cfg = await schedule.get(true);
+    const hhmm = schedule.minsAHhmm(schedule.partsInTz(d).mins);
+    if (hhmm < cfg.horarioClienteDesde || hhmm >= cfg.horarioClienteHasta) {
+      return res.status(400).json({ error: `La hora tiene que estar entre ${cfg.horarioClienteDesde} y ${cfg.horarioClienteHasta}` });
+    }
+    if (!(await clienteConfig.setCita(String(phone), d.toISOString(), { texto: 'puesta a mano', origen: 'manual', updatedBy: por }))) {
+      return res.status(409).json({ error: 'Falta correr sql/013' });
+    }
+    res.json({ ok: true, cita: d.toISOString() });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
+// "Listo": una persona ya atendió a un cliente que la cola mandó a 🙋 Por atender.
+app.post('/api/clientes/atencion/listo', requirePermission('cobranzas.cliente_toggle'), async (req, res) => {
+  try {
+    const { phone } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'Falta phone' });
+    await clienteConfig.setAtencion(String(phone), null, req.user ? req.user.email : null);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
   }
 });
 
@@ -478,7 +528,7 @@ app.put('/api/calls/schedule', requirePermission('cobranzas.horario'), async (re
       patch.agentName = b.agentName || null;
     }
     // Ajustes del follow up: solo si vienen.
-    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'followUpMargenDias', 'retiroManana', 'retiroTarde', 'horarioAuto', 'fuVentanaDias', 'fuReintentosDia1', 'fuSinFechaMismoDia', 'fuCadaDias']) if (k in b) patch[k] = b[k];
+    for (const k of ['promesaTope', 'promesaMaxAtraso', 'reintentoHoras', 'horarioClienteDesde', 'horarioClienteHasta', 'followUpMargenDias', 'retiroManana', 'retiroTarde', 'horarioAuto', 'fuVentanaDias', 'fuReintentosDia1', 'fuSinFechaMismoDia', 'fuCadaDias', 'citaVentanaMin', 'maxMovidas']) if (k in b) patch[k] = b[k];
     const cfg = await schedule.set(patch, req.user ? req.user.email : null);
     res.json(cfg);
   } catch (err) {

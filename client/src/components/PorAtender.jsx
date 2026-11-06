@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { marcarNoRetiro } from '../api';
+import { marcarNoRetiro, atencionListo } from '../api';
 import { money, phoneFmt } from '../format';
 import { dia, ymdRD } from './PromesasView';
 
@@ -29,6 +29,9 @@ export function necesitanAlguien(clientes) {
       const esFecha = /^\d{4}-\d{2}-\d{2}/.test(c.estadoDetalle || '');
       const dijo = !c.estadoDetalle ? 'Dijo que pagó' : esFecha ? `Dijo que pagó el ${fechaCorta(c.estadoDetalle)}` : c.estadoDetalle;
       out.push({ c, motivo: `💬 ${dijo} y sigue el vencido`, desde: c.estadoAt });
+    } else if (c.atencionMotivo) {
+      // La cola no pudo llamarlo en su horario varios días seguidos: lo llama una persona.
+      out.push({ c, motivo: `🕘 ${c.atencionMotivo}`, desde: c.atencionAt, listo: true });
     }
   }
   return out.sort((a, b) => (b.c.deuda_vencida || 0) - (a.c.deuda_vencida || 0));
@@ -142,8 +145,17 @@ export function contarPorAtender(clientes, prom) {
  * @param prom      respuesta de /api/promesas/lista (la carga App, también para el globito)
  * @param onCambio  recargar prom tras corregir un retiro
  */
-export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambio }) {
+export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambio, onRecargar }) {
   const [corrigiendo, setCorrigiendo] = useState(null);
+  const [atendiendo, setAtendiendo] = useState(null);
+  const [errAt, setErrAt] = useState(null);
+
+  const listo = async (c) => {
+    setAtendiendo(c.phone); setErrAt(null);
+    try { await atencionListo(c.phone); if (onRecargar) await onRecargar(); }
+    catch (e) { setErrAt(e.message); }
+    finally { setAtendiendo(null); }
+  };
   const [errRet, setErrRet] = useState(null);
 
   const lista = useMemo(() => necesitanAlguien(clientes), [clientes]);
@@ -168,12 +180,19 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
         </div>
         <div className="aten-col__body">
           {!lista.length && <div className="asis-empty">Nadie necesita a una persona ahora.</div>}
-          {lista.map(({ c, motivo, desde }) => (
+          {errAt && <div className="sched-err" style={{ padding: '8px 14px' }}>{errAt}</div>}
+          {lista.map(({ c, motivo, desde, listo: conListo }) => (
             <Item key={c.phone} nombre={c.name || phoneFmt(c.phone)} prueba={c.prueba} monto={c.deuda_vencida} cls="alerta"
-              linea={`${motivo}${desde ? ` · desde ${fechaCorta(desde)}` : ''}`} onClick={() => ir(c.phone)} />
+              linea={`${motivo}${desde ? ` · desde ${fechaCorta(desde)}` : ''}`} onClick={() => ir(c.phone)}
+              accion={conListo && (
+                <button className="asis-item__accion" disabled={atendiendo === c.phone} onClick={() => listo(c)}
+                  title="Ya lo atendió una persona: sacarlo de la lista">
+                  {atendiendo === c.phone ? '…' : '✓ Listo'}
+                </button>
+              )} />
           ))}
         </div>
-        <div className="aten-col__foot">Ningún agente los llama. Salen de aquí cuando alguien los vuelve a prender en Clientes, o cuando ya no deben.</div>
+        <div className="aten-col__foot">Los de 🙋 y 💬: ningún agente los llama; salen cuando alguien los vuelve a prender en Clientes, o cuando ya no deben. Los de 🕘: la cola no pudo llamarlos en su horario varios días; salen con ✓ Listo.</div>
       </section>
 
       {verRetiros && (

@@ -49,7 +49,7 @@ const PESTANAS = [
 
 // Ajustes que necesitan un SQL propio: solo se mandan si cambiaron (así guardar
 // lo demás funciona aunque falte ese SQL).
-const OPCIONALES = ['followUpMargenDias', 'fuVentanaDias', 'fuReintentosDia1', 'fuSinFechaMismoDia', 'fuCadaDias', 'retiroManana', 'retiroTarde', 'horarioAuto', 'horarioClienteDesde', 'horarioClienteHasta'];
+const OPCIONALES = ['citaVentanaMin', 'maxMovidas', 'followUpMargenDias', 'fuVentanaDias', 'fuReintentosDia1', 'fuSinFechaMismoDia', 'fuCadaDias', 'retiroManana', 'retiroTarde', 'horarioAuto', 'horarioClienteDesde', 'horarioClienteHasta'];
 
 function Fila({ titulo, ayuda, children, nuevo }) {
   return (
@@ -175,6 +175,20 @@ export default function SchedulePanel({ onSaved, superAdmin = false }) {
                       <input type="time" value={cfg.horarioClienteDesde || '08:00'} onChange={(e) => set({ horarioClienteDesde: e.target.value })} />
                       <span>a</span>
                       <input type="time" value={cfg.horarioClienteHasta || '19:00'} onChange={(e) => set({ horarioClienteHasta: e.target.value })} />
+                    </Fila>
+                  </div>
+                  <div className="aj-grupo">
+                    <h4>Orden de la cola</h4>
+                    <div className="sched-tz">Entre las llamadas que pueden salir, primero va la que menos tiempo le queda hoy (una ventana de 10 minutos antes que alguien con todo el día); después los follow ups; después por orden de llegada.</div>
+                    <Fila titulo="Cuando el cliente pide una hora (&quot;llámenme mañana a las 3&quot;)" ayuda="Solo para su próxima llamada: sale a esa hora aunque esté fuera de su horario o del general.">
+                      <span>puede salir hasta</span>
+                      <input type="number" min="10" max="180" value={cfg.citaVentanaMin ?? 30} onChange={(e) => set({ citaVentanaMin: e.target.value })} />
+                      <span>min después</span>
+                    </Fila>
+                    <Fila titulo="Si no alcanza a salir en su ventana corta" ayuda="Su horario propio o la hora que pidió. Pasa al siguiente día con el motivo a la vista en Ver cola; después de estas veces sale de la cola y va a 🙋 Por atender.">
+                      <span>pasa al día siguiente hasta</span>
+                      <input type="number" min="0" max="10" value={cfg.maxMovidas ?? 2} onChange={(e) => set({ maxMovidas: e.target.value })} />
+                      <span>veces</span>
                     </Fila>
                   </div>
                 </>

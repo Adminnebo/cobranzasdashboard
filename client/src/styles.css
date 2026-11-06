@@ -610,7 +610,7 @@ tbody tr:hover { background: var(--surface-2); }
 .horario-chip { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 6px; font: inherit; font-size: 0.72rem; font-weight: 600; white-space: nowrap; cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--accent, var(--good)) 45%, transparent); background: none; color: var(--text-secondary); }
 .horario-chip:hover { color: var(--text-primary); }
-.horario-pop { position: fixed; z-index: 60; width: 300px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+.horario-pop { position: fixed; z-index: 80; /* encima del menú ⋯ (70) */ width: 300px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
   box-shadow: var(--shadow); padding: 14px; display: flex; flex-direction: column; gap: 10px; cursor: default; }
 
 /* Quién llama al cliente ahora (bajo el interruptor del agente normal) */
