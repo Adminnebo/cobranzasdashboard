@@ -49,6 +49,9 @@ const fmtFecha = (iso) => {
 const pctVenc = (c) => (c.deuda_total > 0 ? (c.deuda_vencida / c.deuda_total) * 100 : 0);
 const pctUtil = (c) => (c.credito_ofrecido > 0 ? (c.deuda_total / c.credito_ofrecido) * 100 : 0);
 
+// Búsqueda en Google Maps de la dirección del cliente (RD).
+export const mapaUrl = (dir) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${dir}, República Dominicana`)}`;
+
 export default function ClientesTable({ clientes, llamadas = [], superAdmin = false, foco = null, onChanged }) {
   // Llamadas agrupadas por teléfono (más recientes primero).
   const callsByPhone = useMemo(() => {
@@ -143,7 +146,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
       // Búsqueda por CUALQUIER valor: arma un "texto completo" del cliente.
       const ll = c.ultimaLlamada;
       const hay = [
-        c.name, c.empresa, c.codigo, c.email, c.phone,
+        c.name, c.empresa, c.codigo, c.email, c.phone, c.direccion, c.direccion_ref,
         c.deuda_total, c.deuda_vencida, c.credito_ofrecido,
         ll && intencionLabel(ll.intencion), ll && ll.fechaPago, ll && ll.notas,
         c.ivr ? (c.ivrTipo === 'buzon' ? 'buzon voicemail contestadora' : 'ivr empresa central menu') : '', c.enabled ? 'activo' : 'inactivo',
@@ -638,7 +641,18 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                       {c.name}
                       {c.prueba && <span className="tag-prueba" title="Número de prueba: cliente ficticio, solo lo ven los super admins y no cuenta en nada">Prueba</span>}
                     </div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{c.empresa}</div>
+                    <div className="cli-sub">
+                      {c.empresa}
+                      {c.direccion && (
+                        <>
+                          {c.empresa ? ' · ' : ''}
+                          <a className="cli-dir" href={mapaUrl(c.direccion)} target="_blank" rel="noreferrer"
+                            title={`${c.direccion}${c.direccion_ref ? `\nReferencia: ${c.direccion_ref}` : ''}\nClick: abrir en Google Maps`}>
+                            📍 {c.direccion}
+                          </a>
+                        </>
+                      )}
+                    </div>
                     <div className="cliente-tags">
                       <EstadoCobro c={c} />
                       {c.forzarFollowUp && (

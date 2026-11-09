@@ -603,6 +603,7 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
         id: r.id, phone: r.phone, prueba,
         nombre: (c && c.name) || r.nombre || (prueba ? 'Prueba' : null),
         empresa: c ? c.empresa : null,
+        direccion: (c && c.direccion) || null, direccionRef: (c && c.direccion_ref) || null,
         vencidoHoy: c ? c.deuda_vencida : null,
         estado: r.estado, intento: r.intento || 1, reintentos: r.reintentos || 0,
         fechaPrometida: r.fecha_prometida, textoOriginal: r.texto_original,

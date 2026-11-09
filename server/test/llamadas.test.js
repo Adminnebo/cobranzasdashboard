@@ -87,3 +87,14 @@ test('las llamadas a números de prueba se separan del resto', () => {
   assert.deepEqual(pruebas.map((l) => [l.id, l.prueba]), [[1, true]]);
   assert.deepEqual(separar(ll, new Set()).reales.length, 2);
 });
+
+test('cliente: dirección y referencia del maestro (Get Cartera Cobranzas)', () => {
+  const { normalizeCliente } = require('../data/source');
+  const c = normalizeCliente({ Codigo: 4706, Nombre: 'LADN SRL', Telefono: '8097010048', Balance: 10, Vencido: 5,
+    Direccion: '  GASPAR POLANCO # 258   SANTO DOMINGO ', DireccionReferencia: 'Frente al parque' });
+  assert.equal(c.direccion, 'GASPAR POLANCO # 258 SANTO DOMINGO');
+  assert.equal(c.direccion_ref, 'Frente al parque');
+  const sin = normalizeCliente({ Codigo: 1, Nombre: 'X', Telefono: '8090000000' });
+  assert.equal(sin.direccion, '');
+  assert.equal(sin.direccion_ref, '');
+});
