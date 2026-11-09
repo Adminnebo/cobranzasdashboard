@@ -318,7 +318,7 @@ export default function App() {
 
       {tab === 'clientes' && puede('cobranzas.clientes') && (
         <div className="card" style={{ padding: 0 }}>
-          <ClientesTable clientes={data.clientes} llamadas={data.llamadas} superAdmin={!!data.verPruebas} foco={foco} onChanged={reloadData} />
+          <ClientesTable clientes={data.clientes} llamadas={data.llamadas} retiros={data.retiros} superAdmin={!!data.verPruebas} foco={foco} onChanged={reloadData} />
         </div>
       )}
 

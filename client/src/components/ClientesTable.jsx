@@ -52,7 +52,17 @@ const pctUtil = (c) => (c.credito_ofrecido > 0 ? (c.deuda_total / c.credito_ofre
 // Búsqueda en Google Maps de la dirección del cliente (RD).
 export const mapaUrl = (dir) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${dir}, República Dominicana`)}`;
 
-export default function ClientesTable({ clientes, llamadas = [], superAdmin = false, foco = null, onChanged }) {
+export default function ClientesTable({ clientes, llamadas = [], retiros = [], superAdmin = false, foco = null, onChanged }) {
+  // Retiros que logística ya atendió, por teléfono (salen en el historial de llamadas).
+  const retirosByPhone = useMemo(() => {
+    const map = new Map();
+    for (const r of retiros || []) {
+      if (!r.phone) continue;
+      if (!map.has(r.phone)) map.set(r.phone, []);
+      map.get(r.phone).push(r);
+    }
+    return map;
+  }, [retiros]);
   // Llamadas agrupadas por teléfono (más recientes primero).
   const callsByPhone = useMemo(() => {
     const map = new Map();
@@ -754,7 +764,7 @@ export default function ClientesTable({ clientes, llamadas = [], superAdmin = fa
                 {abierta && (
                   <tr className="call-detail-row">
                     <td colSpan={11}>
-                      <ClientCalls calls={clientCalls}
+                      <ClientCalls calls={clientCalls} retiros={retirosByPhone.get(c.phone) || []}
                         abrir={foco && foco.llamada && String(foco.phone) === String(c.phone) ? foco.llamada : null} />
                     </td>
                   </tr>

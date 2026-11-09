@@ -92,11 +92,32 @@ function camposAviso(a) {
     rcp: a.rcp ? String(a.rcp).slice(0, 100) : null,
     atendido_en: a.atendidoEn || null,
     ...(a.fecha ? { fecha: String(a.fecha).slice(0, 10) } : {}),
+    // Foto del efectivo o cheque (solo retirado). Avisos viejos sin el campo no la tocan.
+    ...('fotoUrl' in a ? { foto_url: fotoValida(a.fotoUrl) } : {}),
   };
 }
 
-const guardar = (externoId, patch) =>
-  db.upsert(TABLE, { externo_id: externoId, ...patch, actualizado_at: new Date().toISOString() }, 'externo_id');
+/** Enlace https de la foto (lo da logística); cualquier otra cosa → null. */
+function fotoValida(u) {
+  const s = typeof u === 'string' ? u.trim() : '';
+  return /^https:\/\/[^\s"'<>]{4,490}$/.test(s) ? s : null;
+}
+
+// sql/014 sin correr: se guarda sin la foto (y se avisa una vez) en vez de perder el aviso.
+let faltaFoto = false;
+const sinFoto = (patch) => { const { foto_url: _f, ...resto } = patch; return resto; };
+
+async function guardar(externoId, patch) {
+  const fila = { externo_id: externoId, ...(faltaFoto ? sinFoto(patch) : patch), actualizado_at: new Date().toISOString() };
+  try {
+    return await db.upsert(TABLE, fila, 'externo_id');
+  } catch (err) {
+    if (!('foto_url' in fila) || !/foto_url/i.test(String(err && err.message))) throw err;
+    faltaFoto = true;
+    console.warn('[retiros-logistica] falta sql/014 (foto_url): se guarda sin la foto');
+    return db.upsert(TABLE, sinFoto(fila), 'externo_id');
+  }
+}
 
 /** Espera antes del próximo intento: 1, 2, 4, 8, 16, 30, 30… minutos. */
 const esperaMin = (intentos) => Math.min(2 ** Math.max(0, intentos - 1), ESPERA_MAX_MIN);
@@ -112,8 +133,8 @@ async function fallo(prev, externoId, error, ahoraMs, extra = {}) {
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
-async function pedir(fetchImpl, method, externoId, body) {
-  const res = await fetchImpl(`${base()}/api/integraciones/retiros/${encodeURIComponent(externoId)}`, {
+async function pedir(fetchImpl, method, externoId, body, sufijo = '') {
+  const res = await fetchImpl(`${base()}/api/integraciones/retiros/${encodeURIComponent(externoId)}${sufijo}`, {
     method,
     headers: { 'Content-Type': 'application/json', 'x-integracion-token': process.env.LOGISTICA_TOKEN },
     body: body ? JSON.stringify(body) : undefined,
@@ -334,7 +355,7 @@ async function volverAPendiente(externoId, por = null) {
   const [p] = (await db.select('promesa_pago', `?select=id,estado&${filtro}&order=created_at.desc&limit=1`)) || [];
   if (p && p.estado === 'dice_pago') await promesas.reabrir(p.id, por);
   await guardar(ext, {
-    estado: null, ruta: null, motivo: null, monto_cent: null, rcp: null, atendido_en: null, fecha: null,
+    estado: null, ruta: null, motivo: null, monto_cent: null, rcp: null, atendido_en: null, fecha: null, foto_url: null,
     enviado_hash: null, cancelado_at: null, error: null, intentos: 0, proximo_intento_at: null,
   });
   console.log(`[retiros-logistica] ${ext} vuelve a pendiente${por ? ` (${por})` : ''}${p ? `, promesa ${p.id}` : ''}`);
@@ -357,21 +378,113 @@ async function manejarAviso(req, res) {
 
 // ── Para la pestaña Retiros ─────────────────────────────────────────────────
 /** Map<llamada_key, estado en logística> para /api/promesas/lista. Vacío si falta sql/012. */
+const COLS = 'externo_id,llamada_key,phone,estado,ruta,motivo,monto_cent,rcp,atendido_en,error,enviado_at,actualizado_at';
+
+/** Filas recientes (con la foto si sql/014 ya corrió). */
+async function filasRecientes(filtro = '') {
+  const desde = new Date(Date.now() - DIAS_FILAS * 86400000).toISOString();
+  const q = (cols) => db.select(TABLE, `?select=${cols}&created_at=gte.${desde}${filtro}`);
+  if (faltaFoto) return q(COLS);
+  try { return await q(`${COLS},foto_url`); }
+  catch (err) {
+    if (!/foto_url/i.test(String(err && err.message))) throw err;
+    faltaFoto = true;
+    return q(COLS);
+  }
+}
+
+/** Lo que ve el panel de un retiro (pastilla, vista de estado, historial). */
+function vista(r) {
+  return {
+    externoId: r.externo_id, estado: r.estado || null, ruta: r.ruta || null, motivo: r.motivo || null,
+    montoCent: r.monto_cent != null ? Number(r.monto_cent) : null, rcp: r.rcp || null,
+    atendidoEn: r.atendido_en || null, fotoUrl: r.foto_url || null,
+    error: r.error === DE_PRUEBA ? null : (r.error || null), prueba: r.error === DE_PRUEBA,
+    enviado: !!r.enviado_at, enviadoAt: r.enviado_at || null, actualizadoAt: r.actualizado_at || null,
+  };
+}
+
 async function mapaPorLlamada() {
   try {
-    const desde = new Date(Date.now() - DIAS_FILAS * 86400000).toISOString();
-    const rows = await db.select(TABLE, `?select=externo_id,llamada_key,estado,ruta,motivo,monto_cent,rcp,atendido_en,error,enviado_at,actualizado_at&created_at=gte.${desde}`);
-    return new Map((rows || []).filter((r) => r.llamada_key).map((r) => [r.llamada_key, {
-      externoId: r.externo_id, estado: r.estado || null, ruta: r.ruta || null, motivo: r.motivo || null,
-      montoCent: r.monto_cent != null ? Number(r.monto_cent) : null, rcp: r.rcp || null,
-      atendidoEn: r.atendido_en || null, error: r.error === DE_PRUEBA ? null : (r.error || null), prueba: r.error === DE_PRUEBA,
-      enviado: !!r.enviado_at, actualizadoAt: r.actualizado_at || null,
-    }]));
+    const rows = await filasRecientes();
+    return new Map((rows || []).filter((r) => r.llamada_key).map((r) => [r.llamada_key, vista(r)]));
   } catch (err) { return new Map(); }
 }
 
+/**
+ * Retiros ya atendidos por logística (retirado / no retirado), para el
+ * historial de llamadas de cada cliente: [{ phone, llamadaKey, ...vista }].
+ */
+async function atendidos() {
+  try {
+    const rows = await filasRecientes('&estado=in.(retirado,no_retirado)');
+    return (rows || []).filter((r) => r.phone).map((r) => ({ phone: String(r.phone), llamadaKey: r.llamada_key || null, ...vista(r) }));
+  } catch (err) { return []; }
+}
+
+// ── Seguimiento en vivo (lo pide el panel al abrir un retiro) ────────────────
+// Logística calcula la llegada al pedirla (OSRM; con Google costaría): se
+// guarda un rato para que varias personas mirando no multipliquen consultas.
+const SEGUIMIENTO_TTL_MS = 60000;
+const seguimientos = new Map(); // externoId → { at, data }
+
+const numOrNull = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+
+/** Normaliza la respuesta de GET /api/integraciones/retiros/:externoId/seguimiento. */
+function normalizarSeguimiento(j) {
+  const x = j && typeof j === 'object' ? j : {};
+  const c = x.camion && typeof x.camion === 'object' ? x.camion : null;
+  const base = camposAviso(x);
+  return {
+    estado: base.estado || null,
+    fecha: x.fecha ? String(x.fecha).slice(0, 10) : null,
+    ruta: base.ruta || null,
+    motivo: base.motivo || null,
+    montoCent: base.monto_cent ?? null,
+    rcp: base.rcp || null,
+    atendidoEn: base.atendido_en || null,
+    fotoUrl: fotoValida(x.fotoUrl),
+    camion: c ? { lat: numOrNull(c.lat), lng: numOrNull(c.lng), registradaEn: c.registradaEn || null, minutosSinGps: numOrNull(c.minutosSinGps) } : null,
+    paradasAntes: numOrNull(x.paradasAntes),
+    distanciaKm: numOrNull(x.distanciaKm),
+    etaMin: numOrNull(x.etaMin),
+    etaEn: x.etaEn || null,
+    fuenteEta: x.fuenteEta || null,
+    calculadoEn: x.calculadoEn || null,
+  };
+}
+
+/**
+ * Cómo va un retiro ahora mismo: { local, logistica, consultadoEn, error? }.
+ * `local` es lo que tenemos guardado (siempre); `logistica`, lo que responde
+ * logística (null si no está configurado, no lo tiene o no respondió).
+ */
+async function seguimiento(externoId, { ahora = Date.now(), fetchImpl = fetch, fresco = false } = {}) {
+  const ext = String(externoId || '');
+  if (!EXTERNO_OK.test(ext)) throw errStatus(400, 'externoId inválido');
+  const [fila] = (await filasRecientes(`&externo_id=eq.${encodeURIComponent(ext)}`)) || [];
+  if (!fila) throw errStatus(404, 'Ese retiro no existe');
+  const local = vista(fila);
+  if (!configurado() || local.prueba || !local.enviado) return { local, logistica: null, consultadoEn: null };
+
+  const c = seguimientos.get(ext);
+  if (!fresco && c && ahora - c.at < SEGUIMIENTO_TTL_MS) return { local, ...c.data };
+  let data;
+  try {
+    const r = await pedir(fetchImpl, 'GET', ext, undefined, '/seguimiento');
+    if (r.ok) data = { logistica: normalizarSeguimiento(r.json), consultadoEn: new Date(ahora).toISOString() };
+    else if (r.status === 404) data = { logistica: null, consultadoEn: new Date(ahora).toISOString(), error: 'Logística no tiene este retiro' };
+    else data = { logistica: null, consultadoEn: null, error: errorHttp(r) };
+  } catch (err) {
+    data = { logistica: null, consultadoEn: null, error: `logística no respondió: ${err.message}` };
+  }
+  if (data.consultadoEn) seguimientos.set(ext, { at: ahora, data });
+  if (seguimientos.size > 300) seguimientos.delete(seguimientos.keys().next().value);
+  return { local, ...data };
+}
+
 module.exports = {
-  sincronizar, manejarAviso, recibirAviso, volverAPendiente, mapaPorLlamada, configurado,
+  sincronizar, manejarAviso, recibirAviso, volverAPendiente, mapaPorLlamada, atendidos, seguimiento, configurado,
   // puras (pruebas)
-  cuerpo, externoDe, esperaMin, notaRetirado, TABLE,
+  cuerpo, externoDe, esperaMin, notaRetirado, normalizarSeguimiento, fotoValida, TABLE,
 };

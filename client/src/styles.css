@@ -734,3 +734,40 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .cli-sub { color: var(--text-muted); font-size: 0.76rem; max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cli-dir { color: inherit; text-decoration: none; }
 .cli-dir:hover { color: var(--text-primary); text-decoration: underline; }
+
+/* Estado de un retiro (Por atender → Retiros): pasos, llegada y foto */
+.asis-item--abierto { background: var(--surface-2); border-left-color: var(--series-1); }
+.retiro-estado { margin: 0 10px 8px 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); display: flex; flex-direction: column; gap: 8px; }
+.retiro-pasos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.retiro-paso { display: flex; gap: 10px; position: relative; padding-bottom: 10px; }
+.retiro-paso:last-child { padding-bottom: 0; }
+.retiro-paso:not(:last-child)::before { content: ''; position: absolute; left: 8px; top: 18px; bottom: 0; width: 2px; background: var(--grid); }
+.retiro-paso--hecho:not(:last-child)::before { background: var(--good); }
+.retiro-paso__punto { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--baseline); background: var(--surface-1);
+  display: grid; place-items: center; font-size: 0.62rem; font-weight: 700; color: #fff; position: relative; z-index: 1; }
+.retiro-paso--hecho .retiro-paso__punto { background: var(--good); border-color: var(--good); }
+.retiro-paso--mal .retiro-paso__punto { background: var(--critical); border-color: var(--critical); }
+.retiro-paso--actual .retiro-paso__punto { border-color: var(--series-1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-1) 25%, transparent); }
+.retiro-paso--actual .retiro-paso__punto::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--series-1); }
+.retiro-paso__txt { display: flex; flex-direction: column; min-width: 0; font-size: 0.78rem; }
+.retiro-paso__txt b { font-weight: 620; }
+.retiro-paso__txt span { color: var(--text-secondary); font-size: 0.74rem; overflow-wrap: anywhere; }
+.retiro-paso--pendiente .retiro-paso__txt b { color: var(--text-muted); font-weight: 500; }
+.retiro-paso--actual .retiro-paso__txt b { color: var(--series-1); }
+.retiro-paso--mal .retiro-paso__txt b { color: var(--critical); }
+.retiro-estado__nota { font-size: 0.74rem; color: var(--text-secondary); }
+.retiro-estado__nota--aviso { color: var(--serious); }
+.retiro-estado__pie { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; font-size: 0.7rem; color: var(--text-muted); border-top: 1px dashed var(--grid); padding-top: 6px; }
+.retiro-estado__acc { display: flex; gap: 4px; }
+.retiro-foto { display: block; max-width: 260px; border-radius: 9px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-2); }
+.retiro-foto img { display: block; width: 100%; max-height: 260px; object-fit: cover; }
+
+/* Retiros en el historial de llamadas */
+.cc-item--retiro { border-color: color-mix(in srgb, var(--good) 35%, var(--border)); }
+.cc-item--retiro-mal { border-color: color-mix(in srgb, var(--critical) 35%, var(--border)); }
+.cc-retiro { padding: 10px 14px 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; border-top: 1px solid var(--border); }
+.cc-retiro__datos { display: grid; grid-template-columns: repeat(2, minmax(110px, auto)); gap: 8px 20px; font-size: 0.8rem; }
+.cc-retiro__datos div { display: flex; flex-direction: column; gap: 1px; }
+.cc-retiro__datos span { color: var(--text-muted); font-size: 0.7rem; }
+.cc-retiro__datos b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.cc-retiro__sinfoto { font-size: 0.76rem; color: var(--text-muted); }
