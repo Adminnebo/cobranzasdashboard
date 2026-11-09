@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { marcarNoRetiro, atencionListo, retiroVolverPendiente } from '../api';
+import RetiroEstado from './RetiroEstado';
 import { money, phoneFmt } from '../format';
 import { dia, ymdRD } from './PromesasView';
 
@@ -114,9 +115,9 @@ function LogisticaPills({ lg }) {
   );
 }
 
-function Item({ nombre, prueba, monto, linea, extra, cls, onClick, titulo, accion }) {
+function Item({ nombre, prueba, monto, linea, extra, cls, onClick, titulo, accion, abierto }) {
   return (
-    <div className={`asis-item ${cls || ''}`}>
+    <div className={`asis-item ${cls || ''} ${abierto ? 'asis-item--abierto' : ''}`}>
       <button className="asis-item__main" onClick={onClick} title={titulo || 'Ir a este cliente en Clientes y llamadas'}>
         <span className="asis-item__l1">
           <span className="asis-item__name">{nombre}{prueba && <span className="tag-prueba">Prueba</span>}</span>
@@ -147,6 +148,7 @@ export function contarPorAtender(clientes, prom) {
  */
 export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambio, onRecargar }) {
   const [corrigiendo, setCorrigiendo] = useState(null);
+  const [abierto, setAbierto] = useState(null); // retiro con su estado desplegado
   const [atendiendo, setAtendiendo] = useState(null);
   const [errAt, setErrAt] = useState(null);
 
@@ -220,7 +222,8 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
               <div key={k}>
                 <div className="asis-sec">{lbl}</div>
                 {ret[k].map((p) => (
-                  <Item key={p.id} nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''}
+                  <Fragment key={p.id}>
+                  <Item nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''} abierto={abierto === p.id}
                     linea={`${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
                     extra={(
                       <>
@@ -228,8 +231,8 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                         <LogisticaPills lg={p.logistica} />
                       </>
                     )}
-                    titulo="Ver la llamada donde lo pidió (en Clientes y llamadas)"
-                    onClick={() => ir(p.phone, { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })}
+                    titulo="Ver cómo va el retiro: repartidor, si va en camino, cuánto falta y la foto"
+                    onClick={() => setAbierto(abierto === p.id ? null : p.id)}
                     accion={k === 'retirados'
                       ? (prom.superAdmin && p.logistica && p.logistica.externoId && (
                         <button className="asis-item__accion" disabled={corrigiendo === p.id} onClick={() => volverPendiente(p)}
@@ -243,11 +246,16 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                           {corrigiendo === p.id ? '…' : 'No es retiro'}
                         </button>
                       )} />
+                  {abierto === p.id && (
+                    <RetiroEstado externoId={p.logistica && p.logistica.externoId} lgLista={p.logistica}
+                      onVerLlamada={() => ir(p.phone, { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })} />
+                  )}
+                  </Fragment>
                 ))}
               </div>
             ))}
           </div>
-          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase, y se manda a logística. A estos clientes no se les llama. Toca uno para oír la llamada; si la IA se equivocó, "No es retiro" (también se cancela en logística). Si ya no debe, sale solo.</div>
+          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase, y se manda a logística. A estos clientes no se les llama. Toca uno para ver cómo va (repartidor, si va en camino, cuánto falta, la foto) y oír la llamada; si la IA se equivocó, "No es retiro" (también se cancela en logística). Si ya no debe, sale solo.</div>
         </section>
       )}
     </div>

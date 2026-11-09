@@ -325,6 +325,63 @@ test('volver a pendiente: deshace el retirado, reabre la promesa y lo vuelve a m
   await assert.rejects(rl.volverAPendiente('nada'), /no existe/);
 });
 
+test('foto: el aviso guarda fotoUrl (solo https) y sale en atendidos para el historial', async () => {
+  sembrar();
+  await rl.sincronizar({ datos: datos(), fetchImpl: fetchFalso() });
+  const foto = 'https://logistica.neboaiconsulting.com/c/abc123/foto';
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', ruta: { referencia: 'R-0012', repartidor: 'Lendy' },
+    montoCent: 500000, rcp: 'RCP-7', atendidoEn: '2026-11-10T15:20:00Z', fotoUrl: foto });
+  assert.equal(fila().foto_url, foto);
+  const at = await rl.atendidos();
+  assert.equal(at.length, 1);
+  assert.equal(at[0].phone, TEL);
+  assert.equal(at[0].fotoUrl, foto);
+  assert.equal(at[0].montoCent, 500000);
+  assert.equal(at[0].ruta.repartidor, 'Lendy');
+
+  assert.equal(rl.fotoValida('http://x.test/foto'), null, 'solo https');
+  assert.equal(rl.fotoValida('javascript:alert(1)'), null);
+  assert.equal(rl.fotoValida(null), null);
+  // Aviso sin el campo (formato viejo): no borra la foto guardada.
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', montoCent: 500000, rcp: 'RCP-7' });
+  assert.equal(fila().foto_url, foto);
+  // Volver a pendiente la borra.
+  await rl.volverAPendiente('log:500');
+  assert.equal(fila().foto_url, null);
+  assert.equal((await rl.atendidos()).length, 0);
+});
+
+test('seguimiento: pregunta a logística, normaliza y guarda 1 min', async () => {
+  sembrar();
+  await rl.sincronizar({ datos: datos(), fetchImpl: fetchFalso() });
+  const resp = { externoId: 'log:500', estado: 'en_ruta', fecha: '2026-11-10', ruta: { referencia: 'R-0012', fecha: '2026-11-10', repartidor: 'Lendy' },
+    camion: { lat: 19.2, lng: -70.5, registradaEn: '2026-11-10T14:00:00Z', minutosSinGps: 2 }, paradasAntes: 3, distanciaKm: 4.2,
+    etaMin: 25, etaEn: '2026-11-10T14:27:00Z', fotoUrl: null, montoCent: null, rcp: null, atendidoEn: null, calculadoEn: '2026-11-10T14:02:00Z' };
+  const f = fetchFalso(() => ({ status: 200, body: resp }));
+  const ahora = Date.now();
+  const r = await rl.seguimiento('log:500', { ahora, fetchImpl: f });
+  assert.equal(f.pedidos[0].method, 'GET');
+  assert.equal(f.pedidos[0].url, 'https://logistica.test/api/integraciones/retiros/log%3A500/seguimiento');
+  assert.equal(r.local.estado, 'por_ubicar', 'lo guardado se manda igual');
+  assert.equal(r.logistica.estado, 'en_ruta');
+  assert.equal(r.logistica.ruta.repartidor, 'Lendy');
+  assert.equal(r.logistica.etaMin, 25);
+  assert.equal(r.logistica.paradasAntes, 3);
+  assert.equal(r.logistica.camion.minutosSinGps, 2);
+
+  await rl.seguimiento('log:500', { ahora: ahora + 30000, fetchImpl: f });
+  assert.equal(f.pedidos.length, 1, 'dentro del minuto no vuelve a preguntar');
+  await rl.seguimiento('log:500', { ahora: ahora + 61000, fetchImpl: f });
+  assert.equal(f.pedidos.length, 2);
+
+  const caida = fetchFalso(() => new Error('ECONNREFUSED'));
+  const e = await rl.seguimiento('log:500', { ahora: ahora + 200000, fetchImpl: caida });
+  assert.equal(e.logistica, null);
+  assert.match(e.error, /no respondió/);
+  assert.equal(e.local.externoId, 'log:500');
+  await assert.rejects(rl.seguimiento('nada'), /no existe/);
+});
+
 test('el id para logística sale de la llamada_key, limpio', () => {
   assert.equal(rl.externoDe('log:123'), 'log:123');
   assert.equal(rl.externoDe('8095550001|2026-11-06T10:00:00.000Z'), '8095550001|2026-11-06T10:00:00.000Z');

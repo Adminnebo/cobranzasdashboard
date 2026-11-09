@@ -221,7 +221,9 @@ app.get('/api/data', async (req, res) => {
     // Las llamadas de prueba nunca entran en métricas; solo los super admins las ven.
     const visibles = superAdmin ? [...llamadas, ...(llamadasPrueba || [])] : llamadas;
     const llamadasSlim = visibles.map(({ _raw, ...l }) => l);
-    res.json({ source, clientes: conFlag, llamadas: llamadasSlim, metrics, cachedAt, cacheAgeMs, verPruebas: superAdmin });
+    // Retiros que logística ya atendió (retirado / no retirado), para el historial de llamadas de cada cliente.
+    const retiros = await retirosLogistica.atendidos();
+    res.json({ source, clientes: conFlag, llamadas: llamadasSlim, retiros, metrics, cachedAt, cacheAgeMs, verPruebas: superAdmin });
   } catch (err) {
     console.error('[/api/data]', err);
     res.status(500).json({ error: (console.error(req.path, err), 'Error interno del servidor') });
@@ -628,6 +630,15 @@ app.post('/api/fichas/no-retiro', requirePermission('cobranzas.promesas'), async
   try {
     await fichas.marcarNoRetiro((req.body || {}).llamadaKey, req.user ? req.user.email : null);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
+// Cómo va un retiro ahora (asignado, en camino, llegada estimada, foto). Lo consulta a logística, con caché de 1 min.
+app.get('/api/retiros/:externoId/seguimiento', requirePermission('cobranzas.promesas'), async (req, res) => {
+  try {
+    res.json(await retirosLogistica.seguimiento(req.params.externoId, { fresco: req.query.fresco === '1' }));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
   }
