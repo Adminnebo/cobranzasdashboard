@@ -100,6 +100,10 @@ function normalizeCliente(r) {
     dias_mora: num(pick(lc, 'dias_mora', 'dias_vencido', 'days_overdue', 'mora')),
     ultimo_pago: str(pick(lc, 'ultimo_pago', 'last_payment', 'fecha_ultimo_pago', 'fechahora') || ''),
     email: str(pick(lc, 'email', 'correo') || ''),
+    // Dirección del maestro de clientes (list_clientesIA), unida por código en
+    // el flujo "Get Cartera Cobranzas". Vacía si el flujo aún no la manda.
+    direccion: str(pick(lc, 'direccion', 'address') || '').replace(/\s+/g, ' ').trim(),
+    direccion_ref: str(pick(lc, 'direccionreferencia', 'direccion_referencia', 'referencia') || '').replace(/\s+/g, ' ').trim(),
     // Fila original completa: conserva TODAS las columnas de la tabla (RNC,
     // FechaSync, etc.) aunque la UI no las muestre. Uso interno del backend
     // (Asistente IA); se elimina antes de mandar al navegador.

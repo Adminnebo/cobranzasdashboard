@@ -16,12 +16,12 @@
  */
 
 const clientes = [
-  { id: 1,  phone: '+525581001001', name: 'Camila Reyes',        empresa: 'JHLQ Servicios',       deuda_total: 630,   deuda_vencida: 430,  credito_ofrecido: 1500, dias_mora: 22,  ultimo_pago: '2026-06-08' },
-  { id: 2,  phone: '+525581001002', name: 'Rodrigo Martínez',    empresa: 'Ferretería El Tornillo', deuda_total: 2450, deuda_vencida: 2450, credito_ofrecido: 3000, dias_mora: 61,  ultimo_pago: '2026-04-15' },
+  { id: 1,  phone: '+525581001001', name: 'Camila Reyes',        empresa: 'JHLQ Servicios',       deuda_total: 630,   deuda_vencida: 430,  credito_ofrecido: 1500, dias_mora: 22,  ultimo_pago: '2026-06-08', direccion: 'Calle Benito Monción #21, La Vega' },
+  { id: 2,  phone: '+525581001002', name: 'Rodrigo Martínez',    empresa: 'Ferretería El Tornillo', deuda_total: 2450, deuda_vencida: 2450, credito_ofrecido: 3000, dias_mora: 61,  ultimo_pago: '2026-04-15', direccion: 'Av. Duarte #145, Santiago' },
   { id: 3,  phone: '+525581001003', name: 'Valentina Cruz',      empresa: 'Boutique Aurora',      deuda_total: 890,   deuda_vencida: 0,    credito_ofrecido: 2000, dias_mora: 8,   ultimo_pago: '2026-06-25' },
-  { id: 4,  phone: '+525581001004', name: 'Diego Hernández',     empresa: 'Taller Hernández',     deuda_total: 5120,  deuda_vencida: 5120, credito_ofrecido: 4000, dias_mora: 95,  ultimo_pago: '2026-03-01' },
+  { id: 4,  phone: '+525581001004', name: 'Diego Hernández',     empresa: 'Taller Hernández',     deuda_total: 5120,  deuda_vencida: 5120, credito_ofrecido: 4000, dias_mora: 95,  ultimo_pago: '2026-03-01', direccion: 'Gaspar Polanco #258, Santo Domingo', referencia: 'Frente al parque' },
   { id: 5,  phone: '+525581001005', name: 'Sofía Ramírez',       empresa: 'Café La Esquina',      deuda_total: 340,   deuda_vencida: 340,  credito_ofrecido: 1000, dias_mora: 35,  ultimo_pago: '2026-05-20' },
-  { id: 6,  phone: '+525581001006', name: 'Mateo González',      empresa: 'Distribuidora MG',     deuda_total: 7800,  deuda_vencida: 6200, credito_ofrecido: 8000, dias_mora: 48,  ultimo_pago: '2026-05-05' },
+  { id: 6,  phone: '+525581001006', name: 'Mateo González',      empresa: 'Distribuidora MG',     deuda_total: 7800,  deuda_vencida: 6200, credito_ofrecido: 8000, dias_mora: 48,  ultimo_pago: '2026-05-05', direccion: 'Calle El Sol #12, Santiago' },
   { id: 7,  phone: '+525581001007', name: 'Isabella Torres',     empresa: 'Farmacia Vida',        deuda_total: 1260,  deuda_vencida: 1260, credito_ofrecido: 2500, dias_mora: 72,  ultimo_pago: '2026-04-08' },
   { id: 8,  phone: '+525581001008', name: 'Sebastián Flores',    empresa: 'Flores Logística',     deuda_total: 3300,  deuda_vencida: 0,    credito_ofrecido: 5000, dias_mora: 12,  ultimo_pago: '2026-06-20' },
   { id: 9,  phone: '+525581001009', name: 'Lucía Morales',       empresa: 'Papelería Central',    deuda_total: 210,   deuda_vencida: 210,  credito_ofrecido: 800,  dias_mora: 41,  ultimo_pago: '2026-05-14' },

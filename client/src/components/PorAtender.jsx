@@ -222,7 +222,12 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                 {ret[k].map((p) => (
                   <Item key={p.id} nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''}
                     linea={`${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
-                    extra={<LogisticaPills lg={p.logistica} />}
+                    extra={(
+                      <>
+                        {p.direccion && <span className="asis-item__l2" title={p.direccionRef ? `Referencia: ${p.direccionRef}` : undefined}>📍 {p.direccion}</span>}
+                        <LogisticaPills lg={p.logistica} />
+                      </>
+                    )}
                     titulo="Ver la llamada donde lo pidió (en Clientes y llamadas)"
                     onClick={() => ir(p.phone, { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })}
                     accion={k === 'retirados'
