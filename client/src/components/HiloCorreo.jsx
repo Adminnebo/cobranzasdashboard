@@ -1,30 +1,102 @@
 import { useEffect, useState } from 'react';
-import { fetchCorreoHilo, abrirAdjuntoCorreo } from '../api';
+import { createPortal } from 'react-dom';
+import { fetchCorreoHilo, bajarAdjuntoCorreo } from '../api';
 import { fmtFechaCorreo, esRebote } from '../correos';
 import { EtiquetaIA } from './EmailsTable';
 
-const VISIBLE = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/plain)$/;
+const ES_IMAGEN = /^image\/(png|jpe?g|gif|webp|bmp)$/;
+const ES_PDF = /^application\/pdf$/;
+const MAX_PREVIA = 15 * 1024 * 1024; // más pesado que esto, solo se descarga a pedido
 
-/** Un adjunto: al pulsarlo se abre (PDF, imagen) o se descarga. */
+const descargar = (url, nombre) => {
+  const el = document.createElement('a');
+  el.href = url; el.download = nombre || 'adjunto';
+  document.body.appendChild(el); el.click(); el.remove();
+};
+
+/** El adjunto ampliado, encima del panel. Se cierra con Esc, la ✕ o tocando fuera. */
+function Ampliado({ a, url, onCerrar }) {
+  useEffect(() => {
+    const tecla = (e) => { if (e.key === 'Escape') onCerrar(); };
+    document.addEventListener('keydown', tecla);
+    const antes = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', tecla); document.body.style.overflow = antes; };
+  }, [onCerrar]);
+  return createPortal(
+    <div className="adj-modal" role="dialog" aria-modal="true" aria-label={a.nombre} onClick={onCerrar}>
+      <div className="adj-modal__barra" onClick={(e) => e.stopPropagation()}>
+        <span className="adj-modal__nombre">📎 {a.nombre}</span>
+        <button type="button" className="mini-btn" onClick={() => descargar(url, a.nombre)}>⬇ Descargar</button>
+        <button type="button" className="mini-btn" onClick={onCerrar} aria-label="Cerrar">✕</button>
+      </div>
+      <div className="adj-modal__cuerpo">
+        {ES_PDF.test(a.tipo)
+          ? <iframe className="adj-modal__pdf" src={url} title={a.nombre} />
+          : <img className="adj-modal__img" src={url} alt={a.nombre} onClick={(e) => e.stopPropagation()} />}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * Un adjunto dentro del mensaje: las imágenes en miniatura y los PDF con su vista previa; al
+ * pulsarlos se amplían encima del panel. Lo demás (Excel, Word…) se descarga.
+ */
 function Adjunto({ hilo, mensaje, a }) {
-  const [estado, setEstado] = useState(null); // null | 'bajando' | mensaje de error
-  if (!a.parte) return <span className="hilo__adjunto">📎 {a.nombre}{a.bytes ? ` · ${kb(a.bytes)}` : ''}</span>;
-  const abrir = () => {
-    // La pestaña se abre ya (en el clic) para que el navegador no la bloquee; se llena al bajar.
-    const ventana = VISIBLE.test(a.tipo || '') ? window.open('', '_blank') : null;
-    setEstado('bajando');
-    abrirAdjuntoCorreo(hilo, mensaje, a.parte, a.nombre, ventana).then(
-      () => setEstado(null),
-      (e) => { if (ventana) ventana.close(); setEstado(e.message || 'No se pudo abrir'); },
+  const tipo = a.tipo || '';
+  const previa = !!a.parte && (ES_IMAGEN.test(tipo) || ES_PDF.test(tipo)) && (!a.bytes || a.bytes <= MAX_PREVIA);
+  const [url, setUrl] = useState(null);
+  const [error, setError] = useState(null);
+  const [bajando, setBajando] = useState(false);
+  const [grande, setGrande] = useState(false);
+
+  // Las vistas previas se bajan al abrir el hilo; la URL se suelta al cerrarlo.
+  useEffect(() => {
+    if (!previa) return undefined;
+    let vivo = true, creada = null;
+    bajarAdjuntoCorreo(hilo, mensaje, a.parte).then(
+      (blob) => { if (!vivo) return; creada = URL.createObjectURL(blob); setUrl(creada); },
+      (e) => vivo && setError(e.message || 'No se pudo cargar'),
     );
-  };
+    return () => { vivo = false; if (creada) URL.revokeObjectURL(creada); };
+  }, [hilo, mensaje, a.parte, previa]);
+
+  const etiqueta = <>📎 {a.nombre}{a.bytes ? ` · ${kb(a.bytes)}` : ''}</>;
+
+  if (!previa) {
+    if (!a.parte) return <span className="hilo__adjunto">{etiqueta}</span>;
+    const bajar = () => {
+      setBajando(true); setError(null);
+      bajarAdjuntoCorreo(hilo, mensaje, a.parte).then((blob) => {
+        const u = URL.createObjectURL(blob);
+        descargar(u, a.nombre);
+        setTimeout(() => URL.revokeObjectURL(u), 60000);
+      }, (e) => setError(e.message || 'No se pudo bajar')).finally(() => setBajando(false));
+    };
+    return (
+      <button type="button" className="hilo__adjunto hilo__adjunto--btn" onClick={bajar} disabled={bajando} title="Descargar el adjunto">
+        {etiqueta}{bajando && ' · bajando…'}{error && <span className="hilo__adjunto-error"> · {error}</span>}
+      </button>
+    );
+  }
+
   return (
-    <button type="button" className="hilo__adjunto hilo__adjunto--btn" onClick={abrir} disabled={estado === 'bajando'}
-      title={VISIBLE.test(a.tipo || '') ? 'Abrir el adjunto' : 'Descargar el adjunto'}>
-      📎 {a.nombre}{a.bytes ? ` · ${kb(a.bytes)}` : ''}
-      {estado === 'bajando' && ' · abriendo…'}
-      {estado && estado !== 'bajando' && <span className="hilo__adjunto-error"> · {estado}</span>}
-    </button>
+    <figure className={`adj-previa ${ES_PDF.test(tipo) ? 'adj-previa--pdf' : 'adj-previa--img'}`}>
+      <button type="button" className="adj-previa__marco" onClick={() => url && setGrande(true)} disabled={!url} title="Ampliar">
+        {error
+          ? <span className="adj-previa__nada hilo__adjunto-error">{error}</span>
+          : !url
+            ? <span className="adj-previa__nada">Cargando…</span>
+            : ES_PDF.test(tipo)
+              ? <iframe className="adj-previa__pdf" src={`${url}#toolbar=0&navpanes=0&view=FitH`} title={a.nombre} tabIndex={-1} />
+              : <img className="adj-previa__img" src={url} alt={a.nombre} />}
+        {url && <span className="adj-previa__ampliar">⤢ Ampliar</span>}
+      </button>
+      <figcaption className="adj-previa__pie">{etiqueta}</figcaption>
+      {grande && url && <Ampliado a={a} url={url} onCerrar={() => setGrande(false)} />}
+    </figure>
   );
 }
 
