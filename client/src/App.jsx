@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchData, fetchAnalysis, fetchHistory, fetchMe, fetchConfig, fetchPromesasLista } from './api';
+import { fetchData, fetchAnalysis, fetchHistory, fetchMe, fetchConfig, fetchPromesasLista, fetchCorreos } from './api';
+import { vincularCorreos } from './correos';
 import { money, moneyShort, pct, num } from './format';
 import { intencionColor } from './constants';
 import KpiCard from './components/KpiCard';
@@ -8,6 +9,7 @@ import Donut from './components/Donut';
 import CarteraTable from './components/CarteraTable';
 import ClientesTable from './components/ClientesTable';
 import CallsTable from './components/CallsTable';
+import EmailsTable from './components/EmailsTable';
 import PromesasView from './components/PromesasView';
 import AiPanel from './components/AiPanel';
 import HistoryCard from './components/HistoryCard';
@@ -25,6 +27,8 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊', perm: 'cobranzas.cartera' },
   { id: 'clientes', label: 'Clientes y llamadas', icon: '👥', perm: 'cobranzas.clientes' },
   { id: 'llamadas', label: 'Llamadas', icon: '📞', perm: 'cobranzas.clientes' },
+  // Solo si el panel tiene el servicio de correo (correo-servicio) configurado.
+  { id: 'emails', label: 'Emails', icon: '📧', perm: 'cobranzas.clientes', soloCorreo: true },
   { id: 'promesas', label: 'Promesas', icon: '⏳', perm: 'cobranzas.promesas' },
   { id: 'cobros', label: 'Cobros', icon: '💵', perm: 'cobranzas.cartera' },
   { id: 'asistente', label: 'Asistente IA', icon: '🤖', perm: 'cobranzas.asistente' },
@@ -56,6 +60,8 @@ export default function App() {
   const [prom, setProm] = useState(null);  // promesas: retiros de "Por atender" y su globito
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
   const llamadasCountRef = useRef(null);
+  // Correos de cobranza enviados y sus respuestas (pestaña Emails e historial de cada cliente).
+  const [correosRes, setCorreosRes] = useState({ correos: [], cargando: true, error: null });
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
@@ -129,6 +135,27 @@ export default function App() {
     return () => clearInterval(id);
   }, [authed, verRetiros]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Correos: al entrar y cada 2 minutos; mientras el servicio lee el buzón, de nuevo a los 5 s.
+  const verCorreos = !!correoEmbed && !!me && (me.isAdmin || !Array.isArray(me.permissions) || me.permissions.includes('cobranzas.clientes'));
+  const correosTimer = useRef(null);
+  const cargarCorreos = (forzar = false) => {
+    clearTimeout(correosTimer.current);
+    if (forzar) setCorreosRes((r) => ({ ...r, sincronizando: true }));
+    return fetchCorreos(forzar).then(
+      (r) => {
+        setCorreosRes({ ...r, cargando: false, error: null });
+        if (r.sincronizando) correosTimer.current = setTimeout(() => cargarCorreos(), 5000);
+      },
+      (e) => setCorreosRes((r) => ({ ...r, cargando: false, sincronizando: false, error: e.message || 'No se pudieron cargar los correos.' })),
+    );
+  };
+  useEffect(() => {
+    if (!authed || !verCorreos) return undefined;
+    cargarCorreos();
+    const id = setInterval(() => cargarCorreos(), 120000);
+    return () => { clearInterval(id); clearTimeout(correosTimer.current); };
+  }, [authed, verCorreos]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const refreshAnalysis = () => {
     setAnalyzing(true);
     fetchAnalysis(true).then(setAnalysis).catch((e) => setError(e.message)).finally(() => setAnalyzing(false));
@@ -161,11 +188,17 @@ export default function App() {
     });
   }, [data, analysis]);
 
+  // Cada correo con su cliente de la cartera y sus respuestas.
+  const correos = useMemo(
+    () => vincularCorreos(correosRes.correos || [], (data && data.clientes) || []),
+    [correosRes.correos, data],
+  );
+
   // ── Permisos granulares ──
   // admin de la app o permissions null (sin migrar) = puede todo; si no, solo lo
   // que traiga la lista. El backend es la fuente de verdad; esto oculta pestañas.
   const puede = (k) => !me || me.isAdmin || !Array.isArray(me.permissions) || me.permissions.includes(k);
-  const tabsVisibles = TABS.filter((t) => puede(t.perm));
+  const tabsVisibles = TABS.filter((t) => puede(t.perm) && (!t.soloCorreo || !!correoEmbed));
   // Correo: admin de la app o rol admin/super_admin de profiles.
   const verCorreo = !!me && (me.isAdmin || me.role === 'admin' || me.role === 'super_admin');
   // Si la pestaña activa dejó de estar permitida, salta a la primera visible.
@@ -318,13 +351,19 @@ export default function App() {
 
       {tab === 'clientes' && puede('cobranzas.clientes') && (
         <div className="card" style={{ padding: 0 }}>
-          <ClientesTable clientes={data.clientes} llamadas={data.llamadas} retiros={data.retiros} superAdmin={!!data.verPruebas} foco={foco} onChanged={reloadData} />
+          <ClientesTable clientes={data.clientes} llamadas={data.llamadas} retiros={data.retiros} correos={verCorreos ? correos : []} superAdmin={!!data.verPruebas} foco={foco} onChanged={reloadData} />
         </div>
       )}
 
       {tab === 'llamadas' && puede('cobranzas.clientes') && (
         <div className="card">
           <CallsTable llamadas={data.llamadas} />
+        </div>
+      )}
+
+      {tab === 'emails' && verCorreos && (
+        <div className="card">
+          <EmailsTable estado={{ ...correosRes, correos }} onRecargar={cargarCorreos} />
         </div>
       )}
 

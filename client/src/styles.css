@@ -771,3 +771,43 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .cc-retiro__datos span { color: var(--text-muted); font-size: 0.7rem; }
 .cc-retiro__datos b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .cc-retiro__sinfoto { font-size: 0.76rem; color: var(--text-muted); }
+
+/* ── Emails (correos de cobranza enviados y sus respuestas) ── */
+.correo-aviso { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 9px 12px; border-radius: var(--radius); font-size: 0.82rem;
+  background: color-mix(in srgb, var(--series-1) 9%, var(--surface-1)); border: 1px solid color-mix(in srgb, var(--series-1) 30%, var(--border)); color: var(--text-secondary); }
+.correo-aviso--mal { background: color-mix(in srgb, var(--warning) 10%, var(--surface-1)); border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); color: var(--text-primary); }
+.correo-resumen { font-size: 0.82rem; color: var(--text-secondary); margin: 2px 0 8px; }
+.correo-resumen__cuenta { color: var(--text-muted); }
+.correo-cod { margin-left: 8px; font-weight: 400; font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.correo-para { color: var(--text-secondary); font-size: 0.8rem; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.correo-asunto { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill--correo-si { color: var(--good-ink); white-space: nowrap; }
+.pill--correo-si .pdot { background: var(--good); }
+.pill--correo-no { color: var(--text-muted); white-space: nowrap; }
+.pill--correo-no .pdot { background: var(--text-muted); }
+.pill--correo-nose { color: var(--text-muted); }
+.correo-tag { border-color: color-mix(in srgb, var(--series-1) 45%, transparent); color: var(--series-1); }
+.cc-item--correo-si { border-color: color-mix(in srgb, var(--good) 35%, var(--border)); }
+
+.hilo { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; }
+.cc-item .hilo { border-top: 1px solid var(--border); }
+.hilo--vacio { color: var(--text-secondary); font-size: 0.85rem; }
+.hilo--error { color: var(--critical); }
+.hilo__nota { color: var(--text-muted); font-size: 0.78rem; margin-top: 4px; }
+.hilo__msg { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); padding: 10px 12px; max-width: 760px; }
+.hilo__msg--cliente { align-self: flex-end; width: min(760px, 100%); border-color: color-mix(in srgb, var(--good) 45%, var(--border)); background: color-mix(in srgb, var(--good) 6%, var(--surface-1)); }
+.hilo__msg--mio.hilo__msg--este { border-color: color-mix(in srgb, var(--series-1) 45%, var(--border)); }
+.hilo__cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 0.78rem; margin-bottom: 4px; }
+.hilo__quien { font-weight: 700; color: var(--series-1); }
+.hilo__quien--cliente { color: var(--good-ink); }
+.hilo__de { color: var(--text-secondary); overflow-wrap: anywhere; }
+.hilo__fecha { margin-left: auto; color: var(--text-muted); white-space: nowrap; }
+.hilo__asunto { font-weight: 600; font-size: 0.86rem; margin-bottom: 6px; }
+.hilo__cuerpo { font-size: 0.86rem; line-height: 1.5; color: var(--text-primary); overflow-wrap: anywhere; overflow-x: auto; }
+.hilo__cuerpo--texto { white-space: pre-wrap; }
+.hilo__cuerpo p { margin: 0 0 8px; }
+.hilo__cuerpo table { border-collapse: collapse; }
+.hilo__cuerpo td, .hilo__cuerpo th { padding: 2px 6px; }
+.hilo__cuerpo a { color: var(--series-1); }
+.hilo__adjuntos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hilo__adjunto { font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-secondary); }

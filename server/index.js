@@ -716,6 +716,8 @@ app.get('/api/calls/log', requirePermission('cobranzas.clientes'), async (req, r
 // ── Administración de usuarios (solo admins) ──
 // Correo de cobranzas (Gmail del cliente vía correo-servicio): admins y super admins.
 app.use('/api/correo', requireAdminRol, correo.router);
+// Correos enviados y sus respuestas: los ve quien ve las llamadas.
+app.use('/api/correos', requirePermission('cobranzas.clientes'), correo.lectura);
 
 app.get('/api/users', requireAdmin, async (req, res) => {
   try { res.json({ users: await users.listUsers() }); }
