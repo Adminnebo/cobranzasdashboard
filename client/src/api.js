@@ -134,6 +134,26 @@ export const fetchConfig = () => get('/api/config');
 export const correoEstado = () => get('/api/correo');
 export const fetchCorreos = (forzar = false) => get(`/api/correos${forzar ? '?forzar=1' : ''}`);
 export const fetchCorreoHilo = (hilo) => get(`/api/correos/hilo/${encodeURIComponent(hilo)}`);
+// Un adjunto de un correo (con la sesión): se abre en otra pestaña si el navegador lo muestra
+// (PDF, imágenes), si no se descarga con su nombre.
+export async function abrirAdjuntoCorreo(hilo, mensaje, parte, nombre, ventana) {
+  const res = await fetch(`/api/correos/hilo/${encodeURIComponent(hilo)}/adjunto/${encodeURIComponent(mensaje)}/${encodeURIComponent(parte)}`, { headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const visible = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/plain)$/.test(blob.type);
+  if (visible && ventana) ventana.location.href = url;
+  else {
+    if (ventana) ventana.close();
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre || 'adjunto';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 export const correoSesion = (proveedor = 'google') => post('/api/correo/sesion', { proveedor });
 export const correoDesconectar = () => del('/api/correo');
 export const correoPlantilla = () => get('/api/correo/plantilla');

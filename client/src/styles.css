@@ -811,3 +811,15 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .hilo__cuerpo a { color: var(--series-1); }
 .hilo__adjuntos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .hilo__adjunto { font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-secondary); }
+
+/* Rebotes: el correo no se entregó (no cuenta como respuesta). */
+.pill--correo-rebote { color: var(--critical); white-space: nowrap; }
+.pill--correo-rebote .pdot { background: var(--critical); }
+.cc-item--correo-rebote { border-color: color-mix(in srgb, var(--critical) 35%, var(--border)); }
+.hilo__msg--rebote { border-color: color-mix(in srgb, var(--critical) 40%, var(--border)); background: color-mix(in srgb, var(--critical) 5%, var(--surface-1)); }
+.hilo__quien--rebote { color: var(--critical); }
+
+.hilo__adjunto--btn { background: var(--surface-2); cursor: pointer; font: inherit; font-size: 0.75rem; }
+.hilo__adjunto--btn:hover:not(:disabled) { border-color: var(--series-1); color: var(--text-primary); }
+.hilo__adjunto--btn:disabled { cursor: progress; opacity: 0.75; }
+.hilo__adjunto-error { color: var(--critical); }

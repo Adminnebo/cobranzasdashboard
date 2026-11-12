@@ -5,6 +5,11 @@
 // Respuestas: los mensajes del hilo que no mandamos nosotros, desde este envío hasta el siguiente
 // envío del mismo hilo (si hubiera varios en un hilo, cada respuesta va con el envío que contesta).
 
+// Aviso de que el correo no se entregó (rebote del servidor de correo): no es una respuesta.
+const REMITENTE_REBOTE = /mailer-daemon|postmaster@|mail delivery (subsystem|system)|microsoftexchange|noreply-dmarc/i;
+const ASUNTO_REBOTE = /delivery status notification|undeliverable|undelivered mail|returned mail|delivery (has )?failed|failure notice|mail delivery failed|no se (pudo|puede) entregar|no entregado|entrega fallida|devuelto/i;
+export const esRebote = (m) => !!m && !m.mio && (REMITENTE_REBOTE.test(m.de || '') || ASUNTO_REBOTE.test(m.asunto || ''));
+
 const phoneKey = (v) => String(v || '').replace(/\D/g, '').slice(-10);
 const correosDe = (v) => (String(v || '').toLowerCase().match(/[^\s<>(),;:"']+@[^\s<>(),;:"']+\.[^\s<>(),;:"']+/g) || []);
 
@@ -33,15 +38,18 @@ export function vincularCorreos(correos = [], clientes = []) {
       || null;
     const desde = Date.parse(c.fecha) || 0;
     const siguiente = c.hilo ? (enviosDeHilo.get(c.hilo) || []).find((t) => t > desde) : undefined;
-    const respuestas = c.mensajes
+    const llegados = c.mensajes
       ? c.mensajes.filter((m) => !m.mio && (Date.parse(m.fecha) || 0) >= desde && (siguiente === undefined || (Date.parse(m.fecha) || 0) < siguiente))
       : null;
+    const respuestas = llegados ? llegados.filter((m) => !esRebote(m)) : null;
+    const rebote = llegados ? llegados.find(esRebote) || null : null;
     return {
       ...c,
       cliente: cliente ? { phone: cliente.phone, name: cliente.name, codigo: cliente.codigo } : null,
       nombre: (cliente && cliente.name) || d.nombre || '',
       phone: (cliente && cliente.phone) || (d.telefono ? phoneKey(d.telefono) : ''),
-      respuestas, // null = no se pudo leer el buzón (no se sabe)
+      respuestas, // null = no se pudo leer el buzón (no se sabe). Sin los rebotes.
+      rebote, // el aviso de que no se entregó (dirección inexistente, buzón lleno…), o null
       ultimaRespuesta: respuestas && respuestas.length ? respuestas[respuestas.length - 1] : null,
     };
   });

@@ -51,7 +51,7 @@ function RetiroItem({ r, abierta, onToggle }) {
 function CorreoItem({ co, abierta, onToggle }) {
   const respondio = co.respuestas && co.respuestas.length > 0;
   return (
-    <div className={`cc-item cc-item--correo ${respondio ? 'cc-item--correo-si' : ''} ${abierta ? 'open' : ''}`}>
+    <div className={`cc-item cc-item--correo ${respondio ? 'cc-item--correo-si' : co.rebote ? 'cc-item--correo-rebote' : ''} ${abierta ? 'open' : ''}`}>
       <button className="cc-head" onClick={onToggle}>
         <span className="cc-caret">{abierta ? '▾' : '▸'}</span>
         <span className="cc-fecha">{fmt(co.fecha)}</span>
