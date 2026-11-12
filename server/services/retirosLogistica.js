@@ -330,36 +330,72 @@ async function recibirAviso(b) {
   }
 
   let dicePago = false;
+  let promesaReabierta = false;
   if (a.estado === 'retirado' && phone) {
     // Primero el cliente: si falla, se responde error y logística reintenta el aviso.
     dicePago = await promesas.dicePagoPorRetiro(phone, notaRetirado(a));
+  } else if (prev && prev.estado === 'retirado') {
+    // Logística anuló el retiro (lo marcaron por error o en una prueba): vuelve
+    // a faltar, así que su promesa se reabre y el cliente sale de "dice que pagó".
+    promesaReabierta = await reabrirPromesaDe(prev, 'logística (retiro anulado)');
+    console.log(`[retiros-logistica] ${ext}: logística anuló el retirado → ${a.estado}${promesaReabierta ? ', promesa reabierta' : ''}`);
   }
-  await guardar(ext, { ...extra, ...camposAviso(a) });
-  return { dicePago };
+  await guardar(ext, { ...extra, ...camposAviso(a), ...(a.estado !== 'retirado' ? SIN_RETIRADO : {}) });
+  seguimientos.delete(ext);
+  return { dicePago, promesaReabierta };
+}
+
+/** Lo que deja de valer cuando un retiro ya no está como retirado. */
+const SIN_RETIRADO = { monto_cent: null, rcp: null, foto_url: null };
+
+/** Reabre la promesa de un retiro si el retirado la había cerrado ("dice que pagó"). */
+async function reabrirPromesaDe(f, por) {
+  const filtro = f.promesa_id ? `id=eq.${encodeURIComponent(f.promesa_id)}` : `llamada_key=eq.${encodeURIComponent(f.llamada_key || f.externo_id)}`;
+  const [p] = (await db.select('promesa_pago', `?select=id,estado&${filtro}&order=created_at.desc&limit=1`)) || [];
+  if (!p || p.estado !== 'dice_pago') return false;
+  await promesas.reabrir(p.id, por);
+  return true;
 }
 
 /**
- * Deshace un "retirado" (p. ej. lo marcaron en una prueba): la promesa se
- * reabre (sin llamadas: es un retiro), el cliente sale de "dice que pagó" y el
- * retiro queda sin estado, así que el motor lo vuelve a mandar a logística en
- * su próxima vuelta y guarda lo que logística responda.
+ * Deshace un "retirado" (p. ej. lo marcaron en una prueba). Lo de verdad se
+ * deshace en logística (Retiros → Anular retiro): su aviso reabre la promesa
+ * solo (recibirAviso). Este botón es para cuando ese aviso no llegó: primero
+ * pregunta a logística y, si allá todavía está retirado, no hace nada (si no,
+ * la próxima vuelta del motor lo volvería a traer como retirado).
+ * Si logística ya no lo tiene retirado, o nunca lo tuvo, la promesa se reabre
+ * (sin llamadas: es un retiro), el cliente sale de "dice que pagó" y el retiro
+ * queda como diga logística, o sin estado para que el motor lo vuelva a mandar.
  */
-async function volverAPendiente(externoId, por = null) {
+async function volverAPendiente(externoId, por = null, { fetchImpl = fetch } = {}) {
   const ext = String(externoId || '');
   if (!EXTERNO_OK.test(ext)) throw errStatus(400, 'externoId inválido');
   const [f] = (await db.select(TABLE, `?select=*&externo_id=eq.${encodeURIComponent(ext)}`)) || [];
   if (!f) throw errStatus(404, 'Ese retiro no existe');
-  if (f.estado !== 'retirado') throw errStatus(409, 'Ese retiro no está como retirado');
-  // Su promesa, si la cerró el aviso de logística ("dice que pagó").
-  const filtro = f.promesa_id ? `id=eq.${encodeURIComponent(f.promesa_id)}` : `llamada_key=eq.${encodeURIComponent(f.llamada_key || ext)}`;
-  const [p] = (await db.select('promesa_pago', `?select=id,estado&${filtro}&order=created_at.desc&limit=1`)) || [];
-  if (p && p.estado === 'dice_pago') await promesas.reabrir(p.id, por);
-  await guardar(ext, {
-    estado: null, ruta: null, motivo: null, monto_cent: null, rcp: null, atendido_en: null, fecha: null, foto_url: null,
-    enviado_hash: null, cancelado_at: null, error: null, intentos: 0, proximo_intento_at: null,
-  });
-  console.log(`[retiros-logistica] ${ext} vuelve a pendiente${por ? ` (${por})` : ''}${p ? `, promesa ${p.id}` : ''}`);
-  return { promesaReabierta: !!(p && p.estado === 'dice_pago') };
+
+  let enLogistica = null; // lo que tiene logística ahora; null = no lo tiene
+  if (configurado() && f.enviado_at && f.error !== DE_PRUEBA) {
+    let r;
+    try { r = await pedir(fetchImpl, 'GET', ext, undefined, '/seguimiento'); }
+    catch (err) { throw errStatus(502, `No se pudo confirmar con logística (${err.message}). Prueba otra vez en un momento.`); }
+    if (r.ok) enLogistica = r.json || {};
+    else if (r.status !== 404) throw errStatus(502, `No se pudo confirmar con logística (${errorHttp(r)}). Prueba otra vez en un momento.`);
+  }
+  if (enLogistica && enLogistica.estado === 'retirado') {
+    throw errStatus(409, 'Logística todavía lo tiene como retirado. Anúlalo allá (Retiros → este retiro → Anular retiro): el recibo queda anulado y aquí vuelve solo a pendiente.');
+  }
+
+  const promesaReabierta = await reabrirPromesaDe(f, por);
+  if (f.estado !== 'retirado' && !promesaReabierta) throw errStatus(409, 'Ese retiro no está como retirado');
+  await guardar(ext, enLogistica
+    ? { ...camposAviso(enLogistica), ...SIN_RETIRADO, error: null, intentos: 0, proximo_intento_at: null }
+    : {
+      estado: null, ruta: null, motivo: null, atendido_en: null, fecha: null, ...SIN_RETIRADO,
+      enviado_hash: null, cancelado_at: null, error: null, intentos: 0, proximo_intento_at: null,
+    });
+  seguimientos.delete(ext);
+  console.log(`[retiros-logistica] ${ext} vuelve a pendiente${por ? ` (${por})` : ''}${enLogistica ? ` (en logística: ${enLogistica.estado})` : ''}${promesaReabierta ? ', promesa reabierta' : ''}`);
+  return { promesaReabierta, enLogistica: enLogistica ? enLogistica.estado || null : null };
 }
 
 /** Handler de Express para POST /api/logistica/retiros/aviso (sin sesión: lo llama logística). */

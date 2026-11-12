@@ -300,14 +300,28 @@ test('retirado → el cliente pasa a "dice que pagó" con la nota, y su promesa 
   assert.equal(rl.notaRetirado({ montoCent: null, rcp: 'RCP-9' }), 'Retirado por logística con el RCP-9');
 });
 
-test('volver a pendiente: deshace el retirado, reabre la promesa y lo vuelve a mandar', async () => {
+test('volver a pendiente: si logística ya no lo tiene, deshace el retirado, reabre la promesa y lo vuelve a mandar', async () => {
   sembrar();
   await rl.sincronizar({ datos: datos(), fetchImpl: fetchFalso() });
-  await assert.rejects(rl.volverAPendiente('log:500'), /no está como retirado/);
+  const sigue = fetchFalso(() => ({ status: 200, body: { externoId: 'log:500', estado: 'por_ubicar' } }));
+  await assert.rejects(rl.volverAPendiente('log:500', null, { fetchImpl: sigue }), /no está como retirado/);
   await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', montoCent: 1000000, rcp: 'RCP-0012', atendidoEn: '2026-11-10T15:20:00Z' });
   assert.equal(t('promesa_pago')[0].estado, 'dice_pago');
 
-  const r = await rl.volverAPendiente('log:500', 'admin@x');
+  // Logística todavía lo tiene retirado: no se toca nada (el motor lo volvería a traer).
+  const retirado = fetchFalso(() => ({ status: 200, body: { externoId: 'log:500', estado: 'retirado', montoCent: 1000000, rcp: 'RCP-0012' } }));
+  await assert.rejects(rl.volverAPendiente('log:500', 'admin@x', { fetchImpl: retirado }), /Anúlalo allá/);
+  assert.equal(retirado.pedidos[0].method, 'GET');
+  assert.match(retirado.pedidos[0].url, /log%3A500\/seguimiento$|log:500\/seguimiento$/);
+  assert.equal(t('promesa_pago')[0].estado, 'dice_pago');
+  assert.equal(fila().estado, 'retirado');
+
+  // Logística no responde: tampoco.
+  await assert.rejects(rl.volverAPendiente('log:500', null, { fetchImpl: fetchFalso(() => new Error('timeout')) }), /No se pudo confirmar/);
+  assert.equal(fila().estado, 'retirado');
+
+  // Logística no lo tiene (404): se limpia aquí y el motor lo vuelve a mandar.
+  const r = await rl.volverAPendiente('log:500', 'admin@x', { fetchImpl: fetchFalso(() => ({ status: 404 })) });
   assert.equal(r.promesaReabierta, true);
   assert.equal(t('promesa_pago')[0].estado, 'pendiente');
   assert.equal(config().estado_cobro, 'promesa', 'sale de "dice que pagó"');
@@ -323,6 +337,52 @@ test('volver a pendiente: deshace el retirado, reabre la promesa y lo vuelve a m
   assert.equal(f.pedidos[0].method, 'PUT');
   assert.equal(fila().estado, 'por_asignar');
   await assert.rejects(rl.volverAPendiente('nada'), /no existe/);
+});
+
+test('volver a pendiente: si logística ya lo anuló y el aviso no llegó, queda como está allá', async () => {
+  sembrar();
+  await rl.sincronizar({ datos: datos(), fetchImpl: fetchFalso() });
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', montoCent: 1000000, rcp: 'RCP-0012', fotoUrl: 'https://logistica.test/c/a/foto' });
+  const anulado = fetchFalso(() => ({ status: 200, body: { externoId: 'log:500', estado: 'en_ruta', ruta: { referencia: 'R-0012', repartidor: 'Lendy' },
+    montoCent: null, rcp: null, fotoUrl: null } }));
+  const r = await rl.volverAPendiente('log:500', 'admin@x', { fetchImpl: anulado });
+  assert.deepEqual(r, { promesaReabierta: true, enLogistica: 'en_ruta' });
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente');
+  const x = fila();
+  assert.equal(x.estado, 'en_ruta');
+  assert.equal(x.ruta.repartidor, 'Lendy');
+  assert.equal(x.rcp, null);
+  assert.equal(x.foto_url, null);
+  assert.ok(x.enviado_hash, 'sigue enviado: el motor no lo vuelve a mandar');
+});
+
+test('logística anula un retirado: la promesa se reabre y se borran monto, RCP y foto', async () => {
+  sembrar();
+  await rl.sincronizar({ datos: datos(), fetchImpl: fetchFalso() });
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', ruta: { referencia: 'R-0012', repartidor: 'Lendy' },
+    montoCent: 1000000, rcp: 'RCP-0012', atendidoEn: '2026-11-10T15:20:00Z', fotoUrl: 'https://logistica.test/c/a/foto' });
+  assert.equal(t('promesa_pago')[0].estado, 'dice_pago');
+  assert.equal((await rl.atendidos()).length, 1);
+
+  // Anulado con la ruta ya cerrada: logística lo deja por asignar (aviso sin fotoUrl, por si acaso).
+  const r = await rl.recibirAviso({ externoId: 'log:500', estado: 'por_asignar', motivo: 'Retiro anulado por Ana: era una prueba' });
+  assert.deepEqual(r, { dicePago: false, promesaReabierta: true });
+  assert.equal(t('promesa_pago')[0].estado, 'pendiente');
+  assert.equal(config().estado_cobro, 'promesa', 'sale de "dice que pagó"');
+  const x = fila();
+  assert.equal(x.estado, 'por_asignar');
+  assert.equal(x.monto_cent, null);
+  assert.equal(x.rcp, null);
+  assert.equal(x.foto_url, null);
+  assert.equal(x.motivo, 'Retiro anulado por Ana: era una prueba');
+  assert.equal((await rl.atendidos()).length, 0, 'sale del historial de llamadas');
+
+  // Aviso repetido: no vuelve a tocar la promesa.
+  const r2 = await rl.recibirAviso({ externoId: 'log:500', estado: 'por_asignar' });
+  assert.equal(r2.promesaReabierta, false);
+  // Y si lo vuelven a retirar, cierra otra vez como siempre.
+  await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', montoCent: 900000, rcp: 'RCP-0013' });
+  assert.equal(t('promesa_pago')[0].estado, 'dice_pago');
 });
 
 test('foto: el aviso guarda fotoUrl (solo https) y sale en atendidos para el historial', async () => {
@@ -346,7 +406,7 @@ test('foto: el aviso guarda fotoUrl (solo https) y sale en atendidos para el his
   await rl.recibirAviso({ externoId: 'log:500', estado: 'retirado', montoCent: 500000, rcp: 'RCP-7' });
   assert.equal(fila().foto_url, foto);
   // Volver a pendiente la borra.
-  await rl.volverAPendiente('log:500');
+  await rl.volverAPendiente('log:500', null, { fetchImpl: fetchFalso(() => ({ status: 404 })) });
   assert.equal(fila().foto_url, null);
   assert.equal((await rl.atendidos()).length, 0);
 });
