@@ -15,11 +15,13 @@ export const esRebote = (m) => !!m && !m.mio && (REMITENTE_REBOTE.test(m.de || '
 export const CATEGORIAS_CORREO = {
   comprobante: { label: 'Envió comprobante', icon: '🧾', color: 'var(--good-ink)' },
   ya_pago: { label: 'Dice que ya pagó', icon: '✅', color: 'var(--good-ink)' },
+  pago_listo: { label: 'Pago listo para retirar', icon: '💵', color: 'var(--good-ink)' },
   nota_credito: { label: 'Nota de crédito', icon: '📝', color: 'var(--series-1)' },
   no_pagara: { label: 'No va a pagar', icon: '⛔', color: 'var(--critical)' },
   disputa: { label: 'No está de acuerdo', icon: '⚠️', color: 'var(--serious)' },
   promesa: { label: 'Va a pagar', icon: '📅', color: 'var(--series-5)' },
   consulta: { label: 'Pide información', icon: '❓', color: 'var(--text-secondary)' },
+  equivocado: { label: 'No es el contacto', icon: '🚫', color: 'var(--serious)' },
   otro: { label: 'Otro', icon: '💬', color: 'var(--text-muted)' },
 };
 const PRIORIDAD = Object.keys(CATEGORIAS_CORREO);

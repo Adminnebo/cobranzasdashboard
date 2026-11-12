@@ -10,7 +10,8 @@ function escenario() {
       { id: 's1', mio: true, de: 'admin@x.com' },
       { id: 'r1', mio: false, de: 'Ana <ana@c.com>', asunto: 'Re: Balance' },
       { id: 'b1', mio: false, de: 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>', asunto: 'Delivery Status Notification (Failure)' },
-      { id: 'r0', mio: false, de: 'Ana <ana@c.com>', etiqueta: { categoria: 'promesa' } },
+      { id: 'r0', mio: false, de: 'Ana <ana@c.com>', etiqueta: { categoria: 'promesa', version: 99 } },
+      { id: 'rv', mio: false, de: 'Ana <ana@c.com>', etiqueta: { categoria: 'otro' } },
     ],
   }, { id: 's2', hilo: null, mensajes: null }];
   const hilo = { mensajes: [
@@ -18,6 +19,7 @@ function escenario() {
     { id: 'r1', mio: false, de: 'Ana <ana@c.com>', asunto: 'Re: Balance', texto: 'Adjunto el comprobante de la transferencia',
       adjuntos: [{ nombre: 'transferencia.jpg', tipo: 'image/jpeg', bytes: 1000, parte: '2' }, { nombre: 'x.xlsx', tipo: 'application/vnd.ms-excel', parte: '3' }] },
     { id: 'b1', mio: false, de: 'mailer-daemon@googlemail.com' },
+    { id: 'rv', mio: false, de: 'Ana <ana@c.com>', texto: 'Tienen cheque disponible' },
   ] };
   const servicio = async (metodo, ruta, cuerpo) => {
     pedidos.push(`${metodo} ${ruta}`);
@@ -38,14 +40,15 @@ function escenario() {
 test('solo lee las respuestas sin etiqueta (no rebotes), con la imagen adjunta, y guarda la etiqueta', async () => {
   const e = escenario();
   const r = await crearClasificador(e).vuelta();
-  assert.deepStrictEqual(r, { leidas: 1 });
-  assert.strictEqual(e.aIA.length, 1, 'una consulta: r1 (b1 es rebote, r0 ya tenía etiqueta)');
+  assert.deepStrictEqual(r, { leidas: 2 });
+  assert.strictEqual(e.aIA.length, 2, 'r1 y rv (etiqueta de una versión vieja); b1 es rebote, r0 ya está al día');
   const contenido = e.aIA[0].messages[1].content;
   assert.match(contenido[0].text, /comprobante de la transferencia/);
   assert.deepStrictEqual(contenido.slice(1).map((p) => p.type), ['image_url'], 'la imagen va; el Excel no');
   assert.ok(e.pedidos.includes('BAJAR /v1/correos/hilo/h1/adjunto/r1/2'));
-  assert.deepStrictEqual(e.puestos.map((p) => [p.mensaje, p.hilo, p.etiqueta.categoria, p.etiqueta.monto, p.etiqueta.fecha]),
-    [['r1', 'h1', 'comprobante', 'RD$ 5,000', '2026-11-11']]);
+  assert.deepStrictEqual(e.puestos.map((p) => [p.mensaje, p.etiqueta.categoria, p.etiqueta.version]),
+    [['r1', 'comprobante', 2], ['rv', 'comprobante', 2]]);
+  assert.deepStrictEqual([e.puestos[0].hilo, e.puestos[0].etiqueta.monto, e.puestos[0].etiqueta.fecha], ['h1', 'RD$ 5,000', '2026-11-11']);
 });
 
 test('categoría desconocida queda en "otro"; si la IA rechaza el adjunto, reintenta solo con el texto', async () => {
@@ -57,7 +60,7 @@ test('categoría desconocida queda en "otro"; si la IA rechaza el adjunto, reint
     return { choices: [{ message: { content: '{"categoria":"inventada","resumen":"x"}' } }] };
   } } } });
   await crearClasificador(e).vuelta();
-  assert.strictEqual(n, 2);
+  assert.strictEqual(n, 3, 'r1: con adjunto falla y reintenta; rv: sin adjuntos');
   assert.strictEqual(e.puestos[0].etiqueta.categoria, 'otro');
 });
 
@@ -69,7 +72,7 @@ test('sin llave de OpenAI no hace nada; disparar no corre dos veces seguidas', a
   const c = crearClasificador(e2);
   await c.disparar();
   assert.strictEqual(c.disparar(), null,'antes de 2 minutos no vuelve a correr');
-  assert.strictEqual(e2.aIA.length, 1);
+  assert.strictEqual(e2.aIA.length, 2);
 });
 
 test('sinHtml deja el texto legible', () => {

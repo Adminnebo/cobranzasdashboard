@@ -2,12 +2,14 @@
  * Lee con IA lo que contestan los clientes a los correos de cobranza y lo etiqueta:
  *
  *   comprobante   mandó comprobante de pago (adjunto o enlace)
- *   ya_pago       dice que ya pagó, sin comprobante
+ *   ya_pago       dice que ya pagó (o depositó / transfirió / abonó), sin comprobante
+ *   pago_listo    tiene el pago o el cheque listo para que lo pasen a buscar
  *   nota_credito  habla de una nota de crédito (emitida, aplicada o por aplicar)
  *   no_pagara     dice que no va a pagar
  *   promesa       dice que va a pagar (con o sin fecha)
  *   disputa       no está de acuerdo con el saldo o la factura
  *   consulta      pide información, facturas, estado de cuenta, otro contacto…
+ *   equivocado    no es el contacto correcto (no tiene que ver con la empresa, pide que no le escriban)
  *   otro          acuse ("recibido", "gracias"), respuesta automática, nada de lo anterior
  *
  * Corre en segundo plano cuando alguien abre los correos (como mucho una vez cada 2 minutos) y
@@ -23,7 +25,9 @@ const POR_VUELTA = 40;
 const MAX_IMAGEN = 4 * 1024 * 1024;
 const MAX_PDF = 3 * 1024 * 1024;
 
-const CATEGORIAS = ['comprobante', 'ya_pago', 'nota_credito', 'no_pagara', 'promesa', 'disputa', 'consulta', 'otro'];
+const CATEGORIAS = ['comprobante', 'ya_pago', 'pago_listo', 'nota_credito', 'no_pagara', 'promesa', 'disputa', 'consulta', 'equivocado', 'otro'];
+// Sube cuando cambian las instrucciones: lo etiquetado con una versión anterior se vuelve a leer.
+const VERSION = 2;
 
 // Mismo criterio que el panel: los avisos de no entrega no son respuestas.
 const REMITENTE_REBOTE = /mailer-daemon|postmaster@|mail delivery (subsystem|system)|microsoftexchange|noreply-dmarc/i;
@@ -35,7 +39,10 @@ const SISTEMA =
   'es su estado de cuenta / balance de saldo con el PDF adjunto). Clasifica la respuesta del CLIENTE en UNA categoría:\n' +
   '- "comprobante": envía un comprobante, recibo, captura o constancia de pago, transferencia o depósito (como adjunto, ' +
   'imagen o enlace). Si manda el comprobante, es esta categoría aunque además diga que ya pagó.\n' +
-  '- "ya_pago": dice que ya pagó, que está al día o que el pago ya se hizo, SIN adjuntar comprobante.\n' +
+  '- "ya_pago": dice que ya pagó, que está al día, o que ya hizo un depósito, transferencia o abono (aunque además ' +
+  'pida verificarlo o que le actualicen el estado de cuenta), SIN adjuntar comprobante.\n' +
+  '- "pago_listo": avisa que tiene el pago, el cheque o el efectivo listo o disponible para que lo pasen a buscar ' +
+  '("tienen cheque disponible", "tenemos el pago listo", "pueden pasar a retirar").\n' +
   '- "nota_credito": menciona una nota de crédito (que se emitió, se aplicó, falta aplicar o que corresponde) como razón ' +
   'de que el saldo no es ese o no debe pagarlo.\n' +
   '- "no_pagara": dice claramente que no va a pagar.\n' +
@@ -43,6 +50,8 @@ const SISTEMA =
   '- "disputa": no está de acuerdo con el saldo, factura o cargo (error, mercancía devuelta, no reconoce la deuda), sin ' +
   'mencionar nota de crédito.\n' +
   '- "consulta": pide información, copia de facturas, detalle del estado de cuenta, o da otro contacto.\n' +
+  '- "equivocado": dice que no es la persona o empresa correcta, que no tiene relación con la cuenta, o pide que no le ' +
+  'escriban más.\n' +
   '- "otro": acuse de recibo ("recibido", "gracias"), respuesta automática (fuera de oficina) o nada de lo anterior.\n' +
   'Mira también las imágenes y PDF adjuntos: si son un comprobante de pago, es "comprobante". No inventes: si dudas entre ' +
   'dos, elige la que el cliente dice más claro y baja la confianza.\n' +
@@ -121,6 +130,7 @@ function crearClasificador({ servicio, bajar, ia = openai }) {
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(String(r.fecha || '')) ? r.fecha : null,
       confianza: Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : null,
       modelo: resp.model || MODEL,
+      version: VERSION,
     };
   }
 
@@ -139,7 +149,7 @@ function crearClasificador({ servicio, bajar, ia = openai }) {
     for (const c of j.correos || []) {
       if (!c.hilo || !c.mensajes) continue;
       for (const m of c.mensajes) {
-        if (m.mio || m.etiqueta || esRebote(m) || vistos.has(m.id) || total >= POR_VUELTA) continue;
+        if (m.mio || (m.etiqueta && m.etiqueta.version >= VERSION) || esRebote(m) || vistos.has(m.id) || total >= POR_VUELTA) continue;
         vistos.add(m.id); total++;
         if (!porHilo.has(c.hilo)) porHilo.set(c.hilo, { correo: c, ids: new Set() });
         porHilo.get(c.hilo).ids.add(m.id);
@@ -178,4 +188,4 @@ function crearClasificador({ servicio, bajar, ia = openai }) {
   return { disparar, vuelta };
 }
 
-module.exports = { crearClasificador, CATEGORIAS, esRebote, sinHtml, SISTEMA };
+module.exports = { crearClasificador, CATEGORIAS, VERSION, esRebote, sinHtml, SISTEMA };
