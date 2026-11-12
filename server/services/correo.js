@@ -31,7 +31,9 @@ async function bajar(ruta) {
   if (!r.ok) throw Object.assign(new Error(`El servicio de correo respondió ${r.status}`), { status: r.status });
   return { tipo: (r.headers.get('content-type') || '').split(';')[0], buffer: Buffer.from(await r.arrayBuffer()) };
 }
-const clasificador = crearClasificador({ servicio, bajar });
+// Lo que contesta el cliente lo lee la IA; si tiene el pago listo para retirar, va a logística
+// como un retiro pedido en una llamada (correosRetiro).
+const clasificador = crearClasificador({ servicio, bajar, alTerminar: (correos) => require('./correosRetiro').crear(correos) });
 
 const router = express.Router();
 router.use((req, res, next) => (configurado() ? next() : res.status(404).json({ error: 'Correo no configurado' })));

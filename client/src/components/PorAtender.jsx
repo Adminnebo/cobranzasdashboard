@@ -132,6 +132,7 @@ function Item({ nombre, prueba, monto, linea, extra, cls, onClick, titulo, accio
 }
 
 // "log:123" → 123 (el id de la llamada en la tabla de llamadas).
+const esCorreo = (k) => /^correo:/.test(String(k || ''));
 const idDeKey = (k) => (/^log:/.test(String(k || '')) ? String(k).slice(4) : null);
 
 /** Cuántos hay por atender (para el globito de la pestaña). */
@@ -226,7 +227,7 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                 {ret[k].map((p) => (
                   <Fragment key={p.id}>
                   <Item nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''} abierto={abierto === p.id}
-                    linea={`${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
+                    linea={`${esCorreo(p.ficha.key) ? '📧 ' : ''}${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
                     extra={(
                       <>
                         {p.direccion && <span className="asis-item__l2" title={p.direccionRef ? `Referencia: ${p.direccionRef}` : undefined}>📍 {p.direccion}</span>}
@@ -250,14 +251,15 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                       )} />
                   {abierto === p.id && (
                     <RetiroEstado externoId={p.logistica && p.logistica.externoId} lgLista={p.logistica}
-                      onVerLlamada={() => ir(p.phone, { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })} />
+                      porCorreo={esCorreo(p.ficha.key)}
+                      onVerLlamada={() => ir(p.phone, esCorreo(p.ficha.key) ? {} : { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })} />
                   )}
                   </Fragment>
                 ))}
               </div>
             ))}
           </div>
-          <div className="aten-col__foot">Lo lee la IA de la llamada: entra solo si el cliente pidió que pasen a buscar el pago, con su frase, y se manda a logística. A estos clientes no se les llama. Toca uno para ver cómo va (repartidor, si va en camino, cuánto falta, la foto) y oír la llamada; si la IA se equivocó, "No es retiro" (también se cancela en logística). Si ya no debe, sale solo.</div>
+          <div className="aten-col__foot">Lo lee la IA de la llamada o de la respuesta al correo (📧): entra solo si el cliente pidió que pasen a buscar el pago, con su frase, y se manda a logística. A estos clientes no se les llama. Toca uno para ver cómo va (repartidor, si va en camino, cuánto falta, la foto) y oír la llamada o leer el correo; si la IA se equivocó, "No es retiro" (también se cancela en logística). Si ya no debe, sale solo.</div>
         </section>
       )}
     </div>

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { crearClasificador, sinHtml } = require('../services/correosIa');
+const { crearClasificador, sinHtml, VERSION } = require('../services/correosIa');
 
 function escenario() {
   const pedidos = [], puestos = [], aIA = [];
@@ -47,7 +47,7 @@ test('solo lee las respuestas sin etiqueta (no rebotes), con la imagen adjunta, 
   assert.deepStrictEqual(contenido.slice(1).map((p) => p.type), ['image_url'], 'la imagen va; el Excel no');
   assert.ok(e.pedidos.includes('BAJAR /v1/correos/hilo/h1/adjunto/r1/2'));
   assert.deepStrictEqual(e.puestos.map((p) => [p.mensaje, p.etiqueta.categoria, p.etiqueta.version]),
-    [['r1', 'comprobante', 2], ['rv', 'comprobante', 2]]);
+    [['r1', 'comprobante', VERSION], ['rv', 'comprobante', VERSION]]);
   assert.deepStrictEqual([e.puestos[0].hilo, e.puestos[0].etiqueta.monto, e.puestos[0].etiqueta.fecha], ['h1', 'RD$ 5,000', '2026-11-11']);
 });
 

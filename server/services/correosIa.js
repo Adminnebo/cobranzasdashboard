@@ -27,7 +27,8 @@ const MAX_PDF = 3 * 1024 * 1024;
 
 const CATEGORIAS = ['comprobante', 'ya_pago', 'pago_listo', 'nota_credito', 'no_pagara', 'promesa', 'disputa', 'consulta', 'equivocado', 'otro'];
 // Sube cuando cambian las instrucciones: lo etiquetado con una versión anterior se vuelve a leer.
-const VERSION = 2;
+// 3: 'pago_listo' trae también cuándo y a qué hora pueden pasar (va a logística).
+const VERSION = 3;
 
 // Mismo criterio que el panel: los avisos de no entrega no son respuestas.
 const REMITENTE_REBOTE = /mailer-daemon|postmaster@|mail delivery (subsystem|system)|microsoftexchange|noreply-dmarc/i;
@@ -42,7 +43,8 @@ const SISTEMA =
   '- "ya_pago": dice que ya pagó, que está al día, o que ya hizo un depósito, transferencia o abono (aunque además ' +
   'pida verificarlo o que le actualicen el estado de cuenta), SIN adjuntar comprobante.\n' +
   '- "pago_listo": avisa que tiene el pago, el cheque o el efectivo listo o disponible para que lo pasen a buscar ' +
-  '("tienen cheque disponible", "tenemos el pago listo", "pueden pasar a retirar").\n' +
+  '("tienen cheque disponible", "tenemos el pago listo", "pueden pasar a retirar"). Va a logística para que lo pasen ' +
+  'a buscar: en "fecha" pon el día que dice que pueden pasar (null si no dijo) y llena "retiro".\n' +
   '- "nota_credito": menciona una nota de crédito (que se emitió, se aplicó, falta aplicar o que corresponde) como razón ' +
   'de que el saldo no es ese o no debe pagarlo.\n' +
   '- "no_pagara": dice claramente que no va a pagar.\n' +
@@ -57,7 +59,9 @@ const SISTEMA =
   'dos, elige la que el cliente dice más claro y baja la confianza.\n' +
   'Responde SOLO un JSON: {"categoria":"...","resumen":"una frase en español, máx. 140 caracteres, de lo que dice el cliente",' +
   '"monto":"monto que menciona o que muestra el comprobante, tal cual, o null","fecha":"fecha de pago que dice o muestra ' +
-  '(YYYY-MM-DD) o null","confianza":0-1}';
+  '(YYYY-MM-DD) o null","confianza":0-1,"retiro":null o, SOLO si es "pago_listo", {"franja":"manana"|"tarde"|"hora"|null,' +
+  '"desde":"HH:MM" 24h si dio hora o null,"hasta":"HH:MM" o null,"frase":"la frase del cliente tal cual, máx. 150 caracteres"}}\n' +
+  'Usa la fecha de la respuesta para resolver "mañana", "el viernes"…';
 
 function openai() {
   const clave = process.env.OPENAI_API_KEY_CORREOS || process.env.OPENAI_API_KEY;
@@ -73,7 +77,7 @@ const sinHtml = (h) => String(h || '').replace(/<(br|\/p|\/div|\/li|\/tr)[^>]*>/
  * @param servicio  (metodo, ruta, cuerpo, op) → JSON de correo-servicio
  * @param bajar     (ruta) → { tipo, buffer } de un adjunto
  */
-function crearClasificador({ servicio, bajar, ia = openai }) {
+function crearClasificador({ servicio, bajar, ia = openai, alTerminar = null }) {
   let corriendo = null, ultima = 0, avisoSinClave = false;
 
   async function partesDe(hilo, m) {
@@ -123,6 +127,8 @@ function crearClasificador({ servicio, bajar, ia = openai }) {
     try { r = JSON.parse(resp.choices[0].message.content) || {}; } catch (_) { r = {}; }
     const categoria = CATEGORIAS.includes(r.categoria) ? r.categoria : 'otro';
     const conf = Number(r.confianza);
+    const ret = categoria === 'pago_listo' && r.retiro && typeof r.retiro === 'object' ? r.retiro : null;
+    const hhmm = (v) => (/^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : null);
     return {
       categoria,
       resumen: String(r.resumen || '').slice(0, 200),
@@ -131,6 +137,11 @@ function crearClasificador({ servicio, bajar, ia = openai }) {
       confianza: Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : null,
       modelo: resp.model || MODEL,
       version: VERSION,
+      ...(ret ? { retiro: {
+        franja: ['manana', 'tarde', 'hora'].includes(ret.franja) ? ret.franja : null,
+        desde: hhmm(ret.desde), hasta: hhmm(ret.hasta),
+        frase: ret.frase ? String(ret.frase).slice(0, 200) : null,
+      } } : {}),
     };
   }
 
@@ -156,6 +167,7 @@ function crearClasificador({ servicio, bajar, ia = openai }) {
       }
     }
     let leidas = 0;
+    const nuevas = new Map(); // id del mensaje → etiqueta recién puesta
     for (const [hilo, { correo, ids }] of porHilo) {
       const items = [];
       try {
@@ -170,9 +182,16 @@ function crearClasificador({ servicio, bajar, ia = openai }) {
       if (items.length) {
         await servicio('PUT', '/v1/correos/etiquetas', { items }, { espera: 30000 });
         leidas += items.length;
+        for (const it of items) nuevas.set(it.mensaje, it.etiqueta);
       }
     }
     if (leidas) console.log(`[correos-ia] ${leidas} respuesta(s) leída(s) con IA`);
+    // Lo que sigue con las etiquetas ('pago listo' → retiro a logística), ya con las de esta vuelta.
+    if (alTerminar) {
+      const correos = (j.correos || []).map((c) => (c.mensajes
+        ? { ...c, mensajes: c.mensajes.map((m) => (nuevas.has(m.id) ? { ...m, etiqueta: nuevas.get(m.id) } : m)) } : c));
+      try { await alTerminar(correos); } catch (e) { console.error('[correos-ia] después de etiquetar:', e.message); }
+    }
     return { leidas };
   }
 

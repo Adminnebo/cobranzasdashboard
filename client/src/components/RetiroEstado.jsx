@@ -69,7 +69,7 @@ export function pasosRetiro(local, lg, ahora) {
  * en camino y cuánto falta, y la foto al retirarlo. Pregunta a logística al
  * abrirla y cada minuto mientras está abierta.
  */
-export default function RetiroEstado({ externoId, lgLista, onVerLlamada }) {
+export default function RetiroEstado({ externoId, lgLista, onVerLlamada, porCorreo = false }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [cargando, setCargando] = useState(false);
@@ -129,7 +129,7 @@ export default function RetiroEstado({ externoId, lgLista, onVerLlamada }) {
         <span>{cargando ? 'Consultando a logística…' : d && d.consultadoEn ? `Logística, ${hace(d.consultadoEn, ahora)}` : ''}</span>
         <span className="retiro-estado__acc">
           <button className="mini-btn" disabled={cargando} onClick={() => cargar(true)}>↻ Actualizar</button>
-          {onVerLlamada && <button className="mini-btn" onClick={onVerLlamada}>🎧 Ver la llamada</button>}
+          {onVerLlamada && <button className="mini-btn" onClick={onVerLlamada}>{porCorreo ? '📧 Ver el correo' : '🎧 Ver la llamada'}</button>}
         </span>
       </div>
     </div>

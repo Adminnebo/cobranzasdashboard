@@ -815,6 +815,12 @@ app.listen(PORT, async () => {
     console.log('  Retiros a logística: inactivo (faltan LOGISTICA_URL / LOGISTICA_TOKEN)');
   }
 
+  // Respuestas a los correos: se leen con IA aunque nadie tenga el panel abierto (las de
+  // "pago listo para retirar" van a logística). Sin CORREO_URL queda apagado.
+  if (correo.configurado()) {
+    cron.schedule(process.env.CORREOS_IA_CRON || '*/5 * * * *', () => correo.clasificador.disparar(), opts);
+  }
+
   const st = await queue.status().catch(() => null);
   console.log(`  Llamadas: ${calls.callsEnabled ? 'ACTIVO' : 'inactivo (falta N8N_CALL_URL)'}`);
   console.log(`  Cola: modo ${st ? st.modo : 'n/d'}${st && st.modo === 'concurrencia' ? ` (máx. ${st.maxConcurrent} simultáneas, vía VAPI)` : ' (1 cada 60s, sin VAPI)'}`);
