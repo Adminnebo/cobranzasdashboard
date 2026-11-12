@@ -57,4 +57,25 @@ lectura.get('/hilo/:hilo', manejar((req) => {
   return servicio('GET', `/v1/correos/hilo/${hilo}`, null, { espera: 30000 });
 }));
 
+// Un adjunto del hilo (el PDF que mandamos o lo que adjuntó el cliente): se pasa tal cual.
+lectura.get('/hilo/:hilo/adjunto/:mensaje/:parte', async (req, res) => {
+  const ok = (v) => /^[A-Za-z0-9_.-]{1,100}$/.test(String(v || ''));
+  const { hilo, mensaje, parte } = req.params;
+  if (!ok(hilo) || !ok(mensaje) || !ok(parte)) return res.status(400).json({ error: 'Adjunto no válido' });
+  try {
+    const r = await fetch(`${URL_BASE()}/v1/correos/hilo/${hilo}/adjunto/${mensaje}/${parte}`, {
+      headers: { 'x-api-key': CLAVE() }, signal: AbortSignal.timeout(60000),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      return res.status(r.status >= 500 ? 502 : r.status).json({ error: j.message || `El servicio de correo respondió ${r.status}` });
+    }
+    for (const h of ['content-type', 'content-disposition']) if (r.headers.get(h)) res.set(h, r.headers.get(h));
+    res.set({ 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch (e) {
+    res.status(502).json({ error: e.message || 'No se pudo bajar el adjunto' });
+  }
+});
+
 module.exports = { router, lectura, configurado, embedUrl };

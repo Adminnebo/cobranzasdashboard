@@ -17,6 +17,13 @@ export function RespuestaPill({ correo }) {
       </span>
     );
   }
+  if (correo.rebote) {
+    return (
+      <span className="pill pill--correo-rebote" title={`El servidor de correo lo devolvió: ${correo.rebote.asunto || ''}`}>
+        <span className="pdot" />❌ No entregado
+      </span>
+    );
+  }
   return <span className="pill pill--correo-no"><span className="pdot" />Sin respuesta</span>;
 }
 
@@ -38,7 +45,8 @@ export default function EmailsTable({ estado, onRecargar }) {
     return correos.filter((c) => {
       if (!inRange(c.fecha)) return false;
       if (resp === 'si' && !(c.respuestas && c.respuestas.length)) return false;
-      if (resp === 'no' && !(c.respuestas && !c.respuestas.length)) return false;
+      if (resp === 'no' && !(c.respuestas && !c.respuestas.length && !c.rebote)) return false;
+      if (resp === 'rebote' && !c.rebote) return false;
       if (!t) return true;
       return (
         (c.nombre || '').toLowerCase().includes(t)
@@ -53,6 +61,7 @@ export default function EmailsTable({ estado, onRecargar }) {
   const { slice, pager } = usePaged(filtered, 25);
   const conRespuesta = filtered.filter((c) => c.respuestas && c.respuestas.length).length;
   const sabe = filtered.some((c) => c.respuestas !== null);
+  const noEntregados = filtered.filter((c) => c.rebote).length;
 
   if (cargando && !correos.length) return <div className="empty-state">Cargando los correos…</div>;
   if (error && !correos.length) {
@@ -82,6 +91,7 @@ export default function EmailsTable({ estado, onRecargar }) {
           <option value="">Con y sin respuesta</option>
           <option value="si">↩ Respondieron</option>
           <option value="no">Sin respuesta</option>
+          <option value="rebote">❌ No entregados</option>
         </select>
         <DateRange value={range} onChange={setRange} />
         <button className="mini-btn" disabled={sincronizando} onClick={() => onRecargar(true)} title="Volver a mirar el buzón ahora">↻ Actualizar</button>
@@ -89,6 +99,7 @@ export default function EmailsTable({ estado, onRecargar }) {
       <div className="correo-resumen">
         📧 <b>{filtered.length}</b> correo{filtered.length === 1 ? '' : 's'}
         {sabe && <> · ↩ <b>{conRespuesta}</b> con respuesta ({filtered.length ? Math.round((conRespuesta / filtered.length) * 100) : 0}%)</>}
+        {noEntregados > 0 && <> · ❌ <b>{noEntregados}</b> no entregado{noEntregados === 1 ? '' : 's'}</>}
         {cuenta && <span className="correo-resumen__cuenta"> · enviados desde {cuenta}</span>}
       </div>
       <Pager p={pager} />
