@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { intencionColor, intencionLabel } from '../constants';
 import CallDetail from './CallDetail';
 import AgenteTag from './AgenteTag';
+import HiloCorreo from './HiloCorreo';
+import { RespuestaPill } from './EmailsTable';
 
 const fmt = (iso) => {
   if (!iso) return '';
@@ -45,6 +47,23 @@ function RetiroItem({ r, abierta, onToggle }) {
   );
 }
 
+/** Un correo de cobranza enviado, en el historial: asunto y si contestó; se despliega con el hilo. */
+function CorreoItem({ co, abierta, onToggle }) {
+  const respondio = co.respuestas && co.respuestas.length > 0;
+  return (
+    <div className={`cc-item cc-item--correo ${respondio ? 'cc-item--correo-si' : ''} ${abierta ? 'open' : ''}`}>
+      <button className="cc-head" onClick={onToggle}>
+        <span className="cc-caret">{abierta ? '▾' : '▸'}</span>
+        <span className="cc-fecha">{fmt(co.fecha)}</span>
+        <span className="agente-tag correo-tag">📧 Correo</span>
+        <RespuestaPill correo={co} />
+        <span className="cc-notas">{co.asunto || (co.para || []).join(', ')}</span>
+      </button>
+      {abierta && <HiloCorreo correo={co} />}
+    </div>
+  );
+}
+
 /** La llamada a desplegar sola: por id, por hora exacta, o la más reciente. */
 function buscar(calls, abrir) {
   if (!abrir || !calls || !calls.length) return null;
@@ -58,11 +77,11 @@ function buscar(calls, abrir) {
  * Lista de llamadas de un cliente; cada una desplegable (grabación + transcripción).
  * `abrir` ({ id, at }) despliega esa llamada sola (al venir desde Promesas).
  */
-export default function ClientCalls({ calls, retiros = [], abrir = null }) {
+export default function ClientCalls({ calls, retiros = [], correos = [], abrir = null }) {
   const [open, setOpen] = useState(() => buscar(calls, abrir));
   useEffect(() => { if (abrir) setOpen(buscar(calls, abrir)); }, [abrir]); // eslint-disable-line react-hooks/exhaustive-deps
   const foco = abrir ? buscar(calls, abrir) : null;
-  if ((!calls || !calls.length) && !retiros.length) {
+  if ((!calls || !calls.length) && !retiros.length && !correos.length) {
     return <div style={{ padding: 14, color: 'var(--text-muted)' }}>Este cliente no tiene llamadas registradas.</div>;
   }
   // Llamadas y retiros atendidos, juntos y por fecha (más recientes primero).
@@ -70,6 +89,7 @@ export default function ClientCalls({ calls, retiros = [], abrir = null }) {
   const items = [
     ...(calls || []).map((ll, i) => ({ tipo: 'llamada', ll, i, at: fechaDe(ll.created_at) })),
     ...retiros.map((r) => ({ tipo: 'retiro', r, at: fechaDe(r.atendidoEn || r.actualizadoAt) })),
+    ...correos.map((co) => ({ tipo: 'correo', co, at: fechaDe(co.fecha) })),
   ].sort((a, b) => b.at - a.at);
   const nRet = retiros.filter((r) => r.estado === 'retirado').length;
   return (
@@ -77,8 +97,13 @@ export default function ClientCalls({ calls, retiros = [], abrir = null }) {
       <div className="cc-title">
         {calls.length} llamada{calls.length === 1 ? '' : 's'} · 📞 {calls.filter((l) => l.agente !== 'seguimiento').length} de cobranzas · ↩ {calls.filter((l) => l.agente === 'seguimiento').length} de follow up
         {retiros.length > 0 && ` · 🚚 ${nRet} retiro${nRet === 1 ? '' : 's'}${retiros.length > nRet ? ` (${retiros.length - nRet} sin retirar)` : ''}`}
+        {correos.length > 0 && ` · 📧 ${correos.length} correo${correos.length === 1 ? '' : 's'} (↩ ${correos.filter((co) => co.respuestas && co.respuestas.length).length} con respuesta)`}
       </div>
       {items.map((it) => {
+        if (it.tipo === 'correo') {
+          const cid = `correo-${it.co.id || it.at}`;
+          return <CorreoItem key={cid} co={it.co} abierta={open === cid} onToggle={() => setOpen(open === cid ? null : cid)} />;
+        }
         if (it.tipo === 'retiro') {
           const rid = `retiro-${it.r.externoId}`;
           return <RetiroItem key={rid} r={it.r} abierta={open === rid} onToggle={() => setOpen(open === rid ? null : rid)} />;

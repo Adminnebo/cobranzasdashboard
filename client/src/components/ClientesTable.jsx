@@ -52,7 +52,7 @@ const pctUtil = (c) => (c.credito_ofrecido > 0 ? (c.deuda_total / c.credito_ofre
 // Búsqueda en Google Maps de la dirección del cliente (RD).
 export const mapaUrl = (dir) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${dir}, República Dominicana`)}`;
 
-export default function ClientesTable({ clientes, llamadas = [], retiros = [], superAdmin = false, foco = null, onChanged }) {
+export default function ClientesTable({ clientes, llamadas = [], retiros = [], correos = [], superAdmin = false, foco = null, onChanged }) {
   // Retiros que logística ya atendió, por teléfono (salen en el historial de llamadas).
   const retirosByPhone = useMemo(() => {
     const map = new Map();
@@ -63,6 +63,16 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], s
     }
     return map;
   }, [retiros]);
+  // Correos de cobranza enviados, por teléfono del cliente (salen en el mismo historial).
+  const correosByPhone = useMemo(() => {
+    const map = new Map();
+    for (const co of correos || []) {
+      if (!co.phone) continue;
+      if (!map.has(co.phone)) map.set(co.phone, []);
+      map.get(co.phone).push(co);
+    }
+    return map;
+  }, [correos]);
   // Llamadas agrupadas por teléfono (más recientes primero).
   const callsByPhone = useMemo(() => {
     const map = new Map();
@@ -604,7 +614,10 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], s
           <tbody>
             {slice.map((c, i) => {
               const pv = Math.round(pctVenc(c));
-              const abierta = openCall === String(c.phone) && c.ultimaLlamada;
+              const clientCorreos = correosByPhone.get(c.phone) || [];
+              const nCorreos = clientCorreos.length;
+              const nRespondidos = clientCorreos.filter((co) => co.respuestas && co.respuestas.length).length;
+              const abierta = openCall === String(c.phone) && (c.ultimaLlamada || nCorreos > 0);
               const clientCalls = callsByPhone.get(c.phone) || [];
               const nCalls = clientCalls.length;
               const nFu = clientCalls.filter((l) => l.agente === 'seguimiento').length;
@@ -702,7 +715,14 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], s
                         <span className="ult-meta">
                           {abierta ? '▾ ' : '▸ '}{fmtFecha(c.ultimaLlamada.fecha)}
                           {' · '}<strong title={`${nCalls - nFu} del agente de cobranzas · ${nFu} del follow up`}>📞 {nCalls - nFu}{nFu ? <> · ↩ {nFu}</> : null}</strong>
+                          {nCorreos > 0 && <strong title={`${nCorreos} correo(s) enviado(s) · ${nRespondidos} con respuesta`}>{' · '}📧 {nCorreos}{nRespondidos ? <> ↩ {nRespondidos}</> : null}</strong>}
                         </span>
+                      </button>
+                    ) : nCorreos > 0 ? (
+                      <button className={`ult-llamada as-btn ${abierta ? 'open' : ''}`} title="Ver los correos de este cliente"
+                        onClick={() => setOpenCall(abierta ? null : String(c.phone))}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Nunca llamado</span>
+                        <span className="ult-meta">{abierta ? '▾ ' : '▸ '}<strong>📧 {nCorreos}{nRespondidos ? <> ↩ {nRespondidos}</> : null}</strong></span>
                       </button>
                     ) : (
                       <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Nunca llamado</span>
@@ -742,9 +762,9 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], s
                         ) : (
                           <button className="row-menu__item" disabled={busy || c.ivr} onClick={() => { setMenu(null); agregarALista([c.phone]); }}>➕ Agregar a la lista</button>
                         ))}
-                        {c.ultimaLlamada && (
+                        {(c.ultimaLlamada || nCorreos > 0) && (
                           <button className="row-menu__item" onClick={() => { setMenu(null); setOpenCall(abierta ? null : String(c.phone)); }}>
-                            {abierta ? '▴ Cerrar llamadas' : '▾ Ver llamadas'}
+                            {abierta ? '▴ Cerrar historial' : c.ultimaLlamada ? '▾ Ver llamadas' : '▾ Ver correos'}
                           </button>
                         )}
                         {superAdmin && !c.prueba && (
@@ -764,7 +784,7 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], s
                 {abierta && (
                   <tr className="call-detail-row">
                     <td colSpan={11}>
-                      <ClientCalls calls={clientCalls} retiros={retirosByPhone.get(c.phone) || []}
+                      <ClientCalls calls={clientCalls} retiros={retirosByPhone.get(c.phone) || []} correos={clientCorreos}
                         abrir={foco && foco.llamada && String(foco.phone) === String(c.phone) ? foco.llamada : null} />
                     </td>
                   </tr>

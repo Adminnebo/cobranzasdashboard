@@ -8,12 +8,12 @@ const CLAVE = () => process.env.CORREO_CLAVE || '';
 const configurado = () => !!(URL_BASE() && CLAVE());
 const embedUrl = () => `${URL_BASE()}/embed.js`;
 
-async function servicio(metodo, ruta, cuerpo) {
+async function servicio(metodo, ruta, cuerpo, { espera = 20000 } = {}) {
   const r = await fetch(URL_BASE() + ruta, {
     method: metodo,
     headers: { 'x-api-key': CLAVE(), 'content-type': 'application/json' },
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(espera),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
@@ -45,4 +45,16 @@ router.put('/plantilla', manejar((req) => servicio('PUT', '/v1/plantilla', {
   por: (req.user && req.user.email) || null,
 })));
 
-module.exports = { router, configurado, embedUrl };
+// Correos enviados a los clientes y sus respuestas (pestaña Emails e historial de cada cliente). Es de
+// solo lectura y la ve quien ve las llamadas. El servicio solo entrega los hilos de los correos que
+// mandó n8n por él, nunca el resto del buzón.
+const lectura = express.Router();
+lectura.use((req, res, next) => (configurado() ? next() : res.status(404).json({ error: 'Correo no configurado' })));
+lectura.get('/', manejar((req) => servicio('GET', `/v1/correos${req.query.forzar === '1' ? '?forzar=1' : ''}`, null, { espera: 30000 })));
+lectura.get('/hilo/:hilo', manejar((req) => {
+  const hilo = String(req.params.hilo || '');
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(hilo)) return Promise.reject(Object.assign(new Error('Hilo no válido'), { status: 400 }));
+  return servicio('GET', `/v1/correos/hilo/${hilo}`, null, { espera: 30000 });
+}));
+
+module.exports = { router, lectura, configurado, embedUrl };

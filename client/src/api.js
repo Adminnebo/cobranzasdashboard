@@ -132,6 +132,8 @@ export const fetchHealth = () => get('/api/health');
 // Correo de cobranzas (Gmail u Outlook del cliente, vía correo-servicio).
 export const fetchConfig = () => get('/api/config');
 export const correoEstado = () => get('/api/correo');
+export const fetchCorreos = (forzar = false) => get(`/api/correos${forzar ? '?forzar=1' : ''}`);
+export const fetchCorreoHilo = (hilo) => get(`/api/correos/hilo/${encodeURIComponent(hilo)}`);
 export const correoSesion = (proveedor = 'google') => post('/api/correo/sesion', { proveedor });
 export const correoDesconectar = () => del('/api/correo');
 export const correoPlantilla = () => get('/api/correo/plantilla');
