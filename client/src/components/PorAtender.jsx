@@ -176,8 +176,10 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
   // Super admins: deshacer un "retirado" (p. ej. lo marcaron en una prueba).
   const volverPendiente = async (p) => {
     if (!window.confirm(`¿Volver a pendiente el retiro de ${p.nombre || phoneFmt(p.phone)}?\n\n` +
-      'Se borra el "retirado" (monto y RCP), su promesa se reabre y el cliente sale de "dice que pagó". ' +
-      'No se le llama: sigue siendo un retiro. Se vuelve a mandar a logística en el próximo minuto.')) return;
+      'Primero se pregunta a logística. Si allá todavía está como retirado, hay que anularlo allá ' +
+      '(Retiros → este retiro → Anular retiro) y aquí vuelve solo a pendiente.\n\n' +
+      'Si logística ya no lo tiene como retirado: se borra el "retirado" (monto, RCP y foto), su promesa se reabre ' +
+      'y el cliente sale de "dice que pagó". No se le llama: sigue siendo un retiro.')) return;
     setCorrigiendo(p.id); setErrRet(null);
     try { await retiroVolverPendiente(p.logistica.externoId); if (onCambio) await onCambio(); }
     catch (e) { setErrRet(e.message); }
@@ -236,7 +238,7 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                     accion={k === 'retirados'
                       ? (prom.superAdmin && p.logistica && p.logistica.externoId && (
                         <button className="asis-item__accion" disabled={corrigiendo === p.id} onClick={() => volverPendiente(p)}
-                          title="Solo super admins: deshacer el retirado (p. ej. una prueba) y dejarlo pendiente otra vez">
+                          title="Solo super admins: deshacer el retirado (p. ej. una prueba). Lo de verdad se anula en logística; esto es por si su aviso no llegó">
                           {corrigiendo === p.id ? '…' : '↺ Volver a pendiente'}
                         </button>
                       ))
