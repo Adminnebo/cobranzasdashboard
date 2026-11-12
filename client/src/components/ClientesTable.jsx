@@ -9,6 +9,7 @@ import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
 import ListsPanel from './ListsPanel';
 import ClientCalls from './ClientCalls';
+import { CATEGORIAS_CORREO, principal } from '../correos';
 import HorarioCliente from './HorarioCliente';
 import CitaCliente from './CitaCliente';
 
@@ -38,6 +39,7 @@ const EMPTY_FILTERS = {
   ultimaDesde: '', ultimaHasta: '',   // rango de fecha de la última llamada
   diasSinContacto: '',    // días desde la última llamada (o nunca) >= N
   conPromesa: false,      // la última llamada dejó una fecha de pago
+  correo: '',             // lo que dijo por correo (categoría de la IA, 'rebote' = no entregado)
 };
 
 const fmtFecha = (iso) => {
@@ -73,6 +75,14 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
     }
     return map;
   }, [correos]);
+  // Lo que dijo cada cliente por correo: lo más importante entre sus respuestas leídas por la IA.
+  const correoDe = useMemo(() => {
+    const map = new Map();
+    for (const [phone, lista] of correosByPhone) {
+      map.set(phone, { ia: principal(lista.map((co) => co.ia)), rebote: lista.some((co) => co.rebote) });
+    }
+    return map;
+  }, [correosByPhone]);
   // Llamadas agrupadas por teléfono (más recientes primero).
   const callsByPhone = useMemo(() => {
     const map = new Map();
@@ -161,6 +171,10 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
         if (dias < min) return false;
       }
       if (f.conPromesa && !(c.ultimaLlamada && c.ultimaLlamada.fechaPago)) return false;
+      if (f.correo) {
+        const co = correoDe.get(c.phone);
+        if (f.correo === 'rebote' ? !(co && co.rebote) : !(co && co.ia && co.ia.categoria === f.correo)) return false;
+      }
 
       if (!t) return true;
       // Búsqueda por CUALQUIER valor: arma un "texto completo" del cliente.
@@ -169,6 +183,7 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
         c.name, c.empresa, c.codigo, c.email, c.phone, c.direccion, c.direccion_ref,
         c.deuda_total, c.deuda_vencida, c.credito_ofrecido,
         ll && intencionLabel(ll.intencion), ll && ll.fechaPago, ll && ll.notas,
+        correoDe.get(c.phone) && correoDe.get(c.phone).ia && CATEGORIAS_CORREO[correoDe.get(c.phone).ia.categoria] && CATEGORIAS_CORREO[correoDe.get(c.phone).ia.categoria].label,
         c.ivr ? (c.ivrTipo === 'buzon' ? 'buzon voicemail contestadora' : 'ivr empresa central menu') : '', c.enabled ? 'activo' : 'inactivo',
       ].filter((x) => x !== null && x !== undefined && x !== '').join(' ').toLowerCase();
 
@@ -177,7 +192,7 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
       const digits = t.replace(/\D/g, '');
       return !!digits && hay.replace(/\D/g, '').includes(digits);
     });
-  }, [clientes, q, f, callsByPhone]);
+  }, [clientes, q, f, callsByPhone, correoDe]);
 
   const sorted = useMemo(() => {
     const val = sortValue[sortKey];
@@ -441,6 +456,13 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
             <option key={k} value={k}>{v.label}</option>
           ))}
         </select>
+        {correos.length > 0 && (
+          <select className="search select" value={f.correo} onChange={(e) => setFilter('correo', e.target.value)} title="Lo que respondió por correo (leído con IA)">
+            <option value="">📧 Cualquier respuesta por correo</option>
+            {Object.entries(CATEGORIAS_CORREO).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+            <option value="rebote">❌ Correo no entregado</option>
+          </select>
+        )}
         <button className={`mini-btn ${showFilters ? 'active' : ''}`} onClick={() => setShowFilters((s) => !s)}>
           ⚙ Filtros {filtrosActivos ? '•' : ''}
         </button>

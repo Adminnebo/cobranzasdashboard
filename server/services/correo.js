@@ -2,6 +2,7 @@
 // Este servidor guarda la clave del cliente (CORREO_CLAVE) y reenvía; el navegador nunca la ve.
 // Sin CORREO_URL + CORREO_CLAVE no hay pestaña ni rutas: el panel queda como siempre.
 const express = require('express');
+const { crearClasificador } = require('./correosIa');
 
 const URL_BASE = () => String(process.env.CORREO_URL || '').replace(/\/+$/, '');
 const CLAVE = () => process.env.CORREO_CLAVE || '';
@@ -23,6 +24,14 @@ async function servicio(metodo, ruta, cuerpo, { espera = 20000 } = {}) {
   }
   return j;
 }
+
+// Baja un adjunto del servicio (para que la IA vea comprobantes en imagen o PDF).
+async function bajar(ruta) {
+  const r = await fetch(URL_BASE() + ruta, { headers: { 'x-api-key': CLAVE() }, signal: AbortSignal.timeout(60000) });
+  if (!r.ok) throw Object.assign(new Error(`El servicio de correo respondió ${r.status}`), { status: r.status });
+  return { tipo: (r.headers.get('content-type') || '').split(';')[0], buffer: Buffer.from(await r.arrayBuffer()) };
+}
+const clasificador = crearClasificador({ servicio, bajar });
 
 const router = express.Router();
 router.use((req, res, next) => (configurado() ? next() : res.status(404).json({ error: 'Correo no configurado' })));
@@ -50,7 +59,12 @@ router.put('/plantilla', manejar((req) => servicio('PUT', '/v1/plantilla', {
 // mandó n8n por él, nunca el resto del buzón.
 const lectura = express.Router();
 lectura.use((req, res, next) => (configurado() ? next() : res.status(404).json({ error: 'Correo no configurado' })));
-lectura.get('/', manejar((req) => servicio('GET', `/v1/correos${req.query.forzar === '1' ? '?forzar=1' : ''}`, null, { espera: 30000 })));
+lectura.get('/', manejar(async (req) => {
+  const j = await servicio('GET', `/v1/correos${req.query.forzar === '1' ? '?forzar=1' : ''}`, null, { espera: 30000 });
+  // Las respuestas nuevas se leen con IA en segundo plano; su etiqueta sale en la próxima carga.
+  if (j.lectura) clasificador.disparar();
+  return j;
+}));
 lectura.get('/hilo/:hilo', manejar((req) => {
   const hilo = String(req.params.hilo || '');
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(hilo)) return Promise.reject(Object.assign(new Error('Hilo no válido'), { status: 400 }));
@@ -78,4 +92,4 @@ lectura.get('/hilo/:hilo/adjunto/:mensaje/:parte', async (req, res) => {
   }
 });
 
-module.exports = { router, lectura, configurado, embedUrl };
+module.exports = { router, lectura, configurado, embedUrl, clasificador };
