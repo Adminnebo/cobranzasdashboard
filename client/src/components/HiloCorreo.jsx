@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchCorreoHilo, bajarAdjuntoCorreo } from '../api';
 import { fmtFechaCorreo, esRebote } from '../correos';
+import { EtiquetaIA } from './EmailsTable';
 
 const ES_IMAGEN = /^image\/(png|jpe?g|gif|webp|bmp)$/;
 const ES_PDF = /^application\/pdf$/;
@@ -129,6 +130,8 @@ export default function HiloCorreo({ correo }) {
   if (estado.cargando) return <div className="hilo hilo--vacio">Abriendo el correo…</div>;
   if (estado.error) return <div className="hilo hilo--vacio hilo--error">{estado.error}</div>;
 
+  // Las etiquetas de la IA vienen en el resumen de la lista (no en el hilo completo).
+  const etiquetas = new Map((correo.mensajes || []).filter((x) => x.etiqueta).map((x) => [x.id, x.etiqueta]));
   return (
     <div className="hilo">
       {estado.mensajes.map((m) => {
@@ -144,6 +147,7 @@ export default function HiloCorreo({ correo }) {
               <span className="hilo__de" title={m.de}>{m.mio ? `a ${(m.para || []).join(', ')}` : m.de}</span>
               <span className="hilo__fecha">{fmtFechaCorreo(m.fecha)}</span>
             </div>
+            {!m.mio && !rebote && etiquetas.get(m.id) && <div className="hilo__ia"><EtiquetaIA ia={etiquetas.get(m.id)} conResumen /></div>}
             {m.asunto && <div className="hilo__asunto">{m.asunto}</div>}
             {usarTexto
               ? <div className="hilo__cuerpo hilo__cuerpo--texto">{m.texto}</div>

@@ -824,6 +824,15 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .hilo__adjunto--btn:disabled { cursor: progress; opacity: 0.75; }
 .hilo__adjunto-error { color: var(--critical); }
 
+/* Lo que dijo el cliente por correo (IA) */
+.etq-ia { display: inline-block; font-size: 0.74rem; font-weight: 600; white-space: nowrap; }
+.etq-ia__resumen { font-weight: 400; color: var(--text-secondary); white-space: normal; }
+.etq-ia--pend { color: var(--text-muted); font-weight: 400; }
+.correo-resp { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.etq-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.etq-chips .chip b { margin-left: 4px; }
+.hilo__ia { margin: 2px 0 6px; }
+.hilo__ia .etq-ia { white-space: normal; }
 /* Adjuntos dentro del mensaje: miniatura / vista previa y ampliados encima del panel */
 .hilo__adjuntos { align-items: flex-start; }
 .adj-previa { margin: 0; display: flex; flex-direction: column; gap: 4px; }

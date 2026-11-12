@@ -3,7 +3,7 @@ import { intencionColor, intencionLabel } from '../constants';
 import CallDetail from './CallDetail';
 import AgenteTag from './AgenteTag';
 import HiloCorreo from './HiloCorreo';
-import { RespuestaPill } from './EmailsTable';
+import { RespuestaPill, EtiquetaIA } from './EmailsTable';
 
 const fmt = (iso) => {
   if (!iso) return '';
@@ -57,7 +57,8 @@ function CorreoItem({ co, abierta, onToggle }) {
         <span className="cc-fecha">{fmt(co.fecha)}</span>
         <span className="agente-tag correo-tag">📧 Correo</span>
         <RespuestaPill correo={co} />
-        <span className="cc-notas">{co.asunto || (co.para || []).join(', ')}</span>
+        {co.ia && <EtiquetaIA ia={co.ia} />}
+        <span className="cc-notas">{(co.ia && co.ia.resumen) || co.asunto || (co.para || []).join(', ')}</span>
       </button>
       {abierta && <HiloCorreo correo={co} />}
     </div>

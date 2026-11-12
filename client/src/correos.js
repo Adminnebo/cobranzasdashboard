@@ -10,6 +10,25 @@ const REMITENTE_REBOTE = /mailer-daemon|postmaster@|mail delivery (subsystem|sys
 const ASUNTO_REBOTE = /delivery status notification|undeliverable|undelivered mail|returned mail|delivery (has )?failed|failure notice|mail delivery failed|no se (pudo|puede) entregar|no entregado|entrega fallida|devuelto/i;
 export const esRebote = (m) => !!m && !m.mio && (REMITENTE_REBOTE.test(m.de || '') || ASUNTO_REBOTE.test(m.asunto || ''));
 
+// Lo que contestó el cliente, leído con IA en el servidor (correosIa.js). En orden de prioridad:
+// si un correo tiene varias respuestas, manda la más importante para cobranza.
+export const CATEGORIAS_CORREO = {
+  comprobante: { label: 'Envió comprobante', icon: '🧾', color: 'var(--good-ink)' },
+  ya_pago: { label: 'Dice que ya pagó', icon: '✅', color: 'var(--good-ink)' },
+  nota_credito: { label: 'Nota de crédito', icon: '📝', color: 'var(--series-1)' },
+  no_pagara: { label: 'No va a pagar', icon: '⛔', color: 'var(--critical)' },
+  disputa: { label: 'No está de acuerdo', icon: '⚠️', color: 'var(--serious)' },
+  promesa: { label: 'Va a pagar', icon: '📅', color: 'var(--series-5)' },
+  consulta: { label: 'Pide información', icon: '❓', color: 'var(--text-secondary)' },
+  otro: { label: 'Otro', icon: '💬', color: 'var(--text-muted)' },
+};
+const PRIORIDAD = Object.keys(CATEGORIAS_CORREO);
+export const principal = (etiquetas) => {
+  const conCat = (etiquetas || []).filter((e) => e && CATEGORIAS_CORREO[e.categoria]);
+  if (!conCat.length) return null;
+  return conCat.reduce((a, b) => (PRIORIDAD.indexOf(b.categoria) < PRIORIDAD.indexOf(a.categoria) ? b : a));
+};
+
 const phoneKey = (v) => String(v || '').replace(/\D/g, '').slice(-10);
 const correosDe = (v) => (String(v || '').toLowerCase().match(/[^\s<>(),;:"']+@[^\s<>(),;:"']+\.[^\s<>(),;:"']+/g) || []);
 
@@ -51,6 +70,10 @@ export function vincularCorreos(correos = [], clientes = []) {
       respuestas, // null = no se pudo leer el buzón (no se sabe). Sin los rebotes.
       rebote, // el aviso de que no se entregó (dirección inexistente, buzón lleno…), o null
       ultimaRespuesta: respuestas && respuestas.length ? respuestas[respuestas.length - 1] : null,
+      // La etiqueta de IA que manda entre sus respuestas ({ categoria, resumen, monto, fecha }), o null.
+      ia: respuestas ? principal(respuestas.map((m) => m.etiqueta)) : null,
+      // Respuestas que la IA todavía no leyó.
+      sinLeer: respuestas ? respuestas.filter((m) => !m.etiqueta).length : 0,
     };
   });
 }
