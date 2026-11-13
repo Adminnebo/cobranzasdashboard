@@ -198,7 +198,7 @@ export default function PromesasView({ onVerCliente = null }) {
                   <td style={{ color: 'var(--text-secondary)' }}>
                     {momento(p.prometidaEl)}
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>
-                      {p.agente === 'seguimiento' ? '↩ al follow up' : '📞 a cobranzas'}{p.origen === 'ia' ? ' · leída por IA' : ''}
+                      {p.origen === 'correo' ? '📧 respondió un correo' : p.agente === 'seguimiento' ? '↩ al follow up' : '📞 a cobranzas'}{p.origen === 'ia' ? ' · leída por IA' : ''}
                     </div>
                   </td>
                   <td>{p.intento}.ª{p.intento >= data.tope ? ' (última)' : ''}</td>
