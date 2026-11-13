@@ -771,6 +771,8 @@ tr.row-clickable:hover .prom-cliente-link { text-decoration: underline; }
 .cc-retiro__datos span { color: var(--text-muted); font-size: 0.7rem; }
 .cc-retiro__datos b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .cc-retiro__sinfoto { font-size: 0.76rem; color: var(--text-muted); }
+.cc-retiro__acc { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 320px; }
+.cc-retiro__aviso { font-size: 0.74rem; color: var(--warning, #d9a441); text-align: right; line-height: 1.35; }
 
 /* ── Emails (correos de cobranza enviados y sus respuestas) ── */
 .correo-aviso { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 9px 12px; border-radius: var(--radius); font-size: 0.82rem;
