@@ -4,6 +4,7 @@ import CallDetail from './CallDetail';
 import AgenteTag from './AgenteTag';
 import HiloCorreo from './HiloCorreo';
 import { RespuestaPill, EtiquetaIA } from './EmailsTable';
+import { retiroVolverPendiente } from '../api';
 
 const fmt = (iso) => {
   if (!iso) return '';
@@ -15,8 +16,22 @@ const idDe = (ll, i) => ll.id ?? (ll.phone + '-' + ll.created_at + '-' + i);
 const pesos = (cent) => `RD$ ${(cent / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 
 /** Un retiro que logística atendió, en el historial: cuándo, cuánto, quién y la foto. */
-function RetiroItem({ r, abierta, onToggle }) {
+function RetiroItem({ r, abierta, onToggle, superAdmin = false, onChanged }) {
   const ok = r.estado === 'retirado';
+  const [revirtiendo, setRevirtiendo] = useState(false);
+  const [aviso, setAviso] = useState(null);
+  // Super admins: deshacer un "retirado" (p. ej. una prueba) y dejarlo como retiro pendiente.
+  const volverPendiente = async () => {
+    if (!window.confirm('¿Volver este retiro a pendiente?\n\n' +
+      'Primero se pregunta a logística. Si allá todavía está como retirado, hay que anularlo allá ' +
+      '(Retiros → este retiro → Anular retiro) y aquí vuelve solo a pendiente.\n\n' +
+      'Si logística ya no lo tiene como retirado: se borran el monto, el RCP y la foto, su promesa se reabre ' +
+      'y el cliente sale de "dice que pagó". No se le llama: sigue siendo un retiro.')) return;
+    setRevirtiendo(true); setAviso(null);
+    try { await retiroVolverPendiente(r.externoId); if (onChanged) await onChanged(); }
+    catch (e) { setAviso(e.message); }
+    finally { setRevirtiendo(false); }
+  };
   const ruta = r.ruta || {};
   const quien = [ruta.repartidor, ruta.referencia].filter(Boolean).join(' · ');
   return (
@@ -41,6 +56,15 @@ function RetiroItem({ r, abierta, onToggle }) {
           {r.fotoUrl
             ? <a className="retiro-foto" href={r.fotoUrl} target="_blank" rel="noreferrer" title="Abrir la foto en grande"><img src={r.fotoUrl} alt="Foto del pago retirado" loading="lazy" /></a>
             : <div className="cc-retiro__sinfoto">Sin foto.</div>}
+          {ok && superAdmin && r.externoId && (
+            <div className="cc-retiro__acc">
+              <button className="mini-btn" disabled={revirtiendo} onClick={volverPendiente}
+                title="Solo super admins: deshacer el retirado (p. ej. una prueba) y dejarlo como retiro pendiente">
+                {revirtiendo ? '…' : '↺ Volver a pendiente'}
+              </button>
+              {aviso && <div className="cc-retiro__aviso">{aviso}</div>}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -78,7 +102,7 @@ function buscar(calls, abrir) {
  * Lista de llamadas de un cliente; cada una desplegable (grabación + transcripción).
  * `abrir` ({ id, at }) despliega esa llamada sola (al venir desde Promesas).
  */
-export default function ClientCalls({ calls, retiros = [], correos = [], abrir = null }) {
+export default function ClientCalls({ calls, retiros = [], correos = [], abrir = null, superAdmin = false, onChanged }) {
   const [open, setOpen] = useState(() => buscar(calls, abrir));
   useEffect(() => { if (abrir) setOpen(buscar(calls, abrir)); }, [abrir]); // eslint-disable-line react-hooks/exhaustive-deps
   const foco = abrir ? buscar(calls, abrir) : null;
@@ -107,7 +131,7 @@ export default function ClientCalls({ calls, retiros = [], correos = [], abrir =
         }
         if (it.tipo === 'retiro') {
           const rid = `retiro-${it.r.externoId}`;
-          return <RetiroItem key={rid} r={it.r} abierta={open === rid} onToggle={() => setOpen(open === rid ? null : rid)} />;
+          return <RetiroItem key={rid} r={it.r} abierta={open === rid} onToggle={() => setOpen(open === rid ? null : rid)} superAdmin={superAdmin} onChanged={onChanged} />;
         }
         const { ll, i } = it;
         const id = idDe(ll, i);

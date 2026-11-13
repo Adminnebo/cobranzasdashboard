@@ -807,6 +807,7 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
                   <tr className="call-detail-row">
                     <td colSpan={11}>
                       <ClientCalls calls={clientCalls} retiros={retirosByPhone.get(c.phone) || []} correos={clientCorreos}
+                        superAdmin={superAdmin} onChanged={onChanged}
                         abrir={foco && foco.llamada && String(foco.phone) === String(c.phone) ? foco.llamada : null} />
                     </td>
                   </tr>
