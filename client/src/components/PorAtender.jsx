@@ -133,6 +133,8 @@ function Item({ nombre, prueba, monto, linea, extra, cls, onClick, titulo, accio
 
 // "log:123" → 123 (el id de la llamada en la tabla de llamadas).
 const esCorreo = (k) => /^correo:/.test(String(k || ''));
+// Retiro creado a mano en el panel (menú ⋯ del cliente): no viene de una llamada ni de un correo.
+const esManual = (k) => /^manual:/.test(String(k || ''));
 const idDeKey = (k) => (/^log:/.test(String(k || '')) ? String(k).slice(4) : null);
 
 /** Cuántos hay por atender (para el globito de la pestaña). */
@@ -226,8 +228,8 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                 <div className="asis-sec">{lbl}</div>
                 {ret[k].map((p) => (
                   <Fragment key={p.id}>
-                  <Item nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''} abierto={abierto === p.id}
-                    linea={`${esCorreo(p.ficha.key) ? '📧 ' : ''}${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
+                  <Item nombre={p.nombre || phoneFmt(p.phone)} prueba={p.prueba} monto={esManual(p.ficha.key) && p.montoAlPrometer != null ? p.montoAlPrometer : p.vencidoHoy} cls={k === 'hoy' ? 'hoy' : ''} abierto={abierto === p.id}
+                    linea={`${esCorreo(p.ficha.key) ? '📧 ' : esManual(p.ficha.key) ? '✋ ' : ''}${retiroTexto(p)}${p.ficha.retiro && p.ficha.retiro.texto ? ` · "${p.ficha.retiro.texto}"` : ''}`}
                     extra={(
                       <>
                         {p.direccion && <span className="asis-item__l2" title={p.direccionRef ? `Referencia: ${p.direccionRef}` : undefined}>📍 {p.direccion}</span>}
@@ -252,7 +254,7 @@ export default function PorAtender({ clientes, prom, verRetiros, onPick, onCambi
                   {abierto === p.id && (
                     <RetiroEstado externoId={p.logistica && p.logistica.externoId} lgLista={p.logistica}
                       porCorreo={esCorreo(p.ficha.key)}
-                      onVerLlamada={() => ir(p.phone, esCorreo(p.ficha.key) ? {} : { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })} />
+                      onVerLlamada={esManual(p.ficha.key) ? null : () => ir(p.phone, esCorreo(p.ficha.key) ? {} : { id: idDeKey(p.ficha.key) || p.llamadaId, at: p.ficha.llamadaAt || p.prometidaEl })} />
                   )}
                   </Fragment>
                 ))}

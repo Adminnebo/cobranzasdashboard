@@ -27,6 +27,7 @@ const iaCosto = require('./services/iaCosto');
 const history = require('./services/history');
 const cobros = require('./services/cobros');
 const retirosLogistica = require('./services/retirosLogistica');
+const retiroManual = require('./services/retiroManual');
 
 const app = express();
 
@@ -628,8 +629,12 @@ app.get('/api/promesas/lista', requirePermission('cobranzas.promesas'), async (r
 // "No es retiro": corrección a mano de la ficha de una llamada.
 app.post('/api/fichas/no-retiro', requirePermission('cobranzas.promesas'), async (req, res) => {
   try {
-    await fichas.marcarNoRetiro((req.body || {}).llamadaKey, req.user ? req.user.email : null);
-    res.json({ ok: true });
+    const key = (req.body || {}).llamadaKey;
+    const por = req.user ? req.user.email : null;
+    await fichas.marcarNoRetiro(key, por);
+    // Un retiro creado a mano no tiene llamada detrás: su promesa se cierra.
+    const promesaCerrada = await retiroManual.deshacer(key, por);
+    res.json({ ok: true, promesaCerrada });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
   }
@@ -645,6 +650,15 @@ app.get('/api/retiros/:externoId/seguimiento', requirePermission('cobranzas.prom
 });
 
 // Deshacer un "retirado" de logística (p. ej. una prueba): vuelve a pendiente. Solo super admins.
+// Retiro creado a mano (super admins): { phone, monto, fecha?, nota? } → sale en 🚚 Retiros y va a logística.
+app.post('/api/retiros/manual', soloSuperAdmin, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await retiroManual.crear(req.body, req.user ? req.user.email : null)) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : (console.error(req.path, err), 'Error interno del servidor') });
+  }
+});
+
 app.post('/api/retiros/volver-pendiente', soloSuperAdmin, async (req, res) => {
   try {
     res.json({ ok: true, ...(await retirosLogistica.volverAPendiente((req.body || {}).externoId, req.user ? req.user.email : null)) });

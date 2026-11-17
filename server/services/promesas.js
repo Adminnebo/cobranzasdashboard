@@ -436,7 +436,9 @@ async function revisarAbiertas(clientesPorTel, cfg, { ahora: ahoraFecha = new Da
       }
       ausentes.delete(phone);
       const fecha = String(p.fecha_prometida).slice(0, 10);
-      if ((c.deuda_vencida || 0) <= 0 && !c._forzar) {
+      // Un retiro creado a mano en el panel lo decidió una persona: no se da por
+      // cumplido porque el cliente no tenga vencido (se cierra con logística).
+      if ((c.deuda_vencida || 0) <= 0 && !c._forzar && p.origen !== 'manual') {
         if (fecha <= hoy || p.estado === 'en_seguimiento') {
           await cerrar(p, 'cumplida', 'sin vencido');
           await clienteConfig.salirEstado(phone);
