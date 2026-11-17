@@ -108,6 +108,8 @@ export const reabrirPromesa = (id) => post(`/api/promesas/${encodeURIComponent(i
 export const marcarNoRetiro = (llamadaKey) => post('/api/fichas/no-retiro', { llamadaKey });
 export const fetchRetiroSeguimiento = (externoId, fresco = false) => get(`/api/retiros/${encodeURIComponent(externoId)}/seguimiento${fresco ? '?fresco=1' : ''}`);
 export const retiroVolverPendiente = (externoId) => post('/api/retiros/volver-pendiente', { externoId });
+// Retiro creado a mano (super admins): sale en 🚚 Retiros y va a logística.
+export const crearRetiroManual = (phone, monto, fecha, nota) => post('/api/retiros/manual', { phone, monto, fecha, nota });
 // Costo de la IA que lee las llamadas y su cobro en Sword (solo super admins).
 export const fetchIaConsumo = () => get('/api/ia-consumo');
 export const saveIaConfig = (cfg) => put('/api/ia-consumo/config', cfg);

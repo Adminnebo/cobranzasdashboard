@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { money, phoneFmt, num } from '../format';
 import { usePaged } from '../usePaged';
 import { INTENCION, intencionColor, intencionLabel } from '../constants';
-import { setClientesEnabled, setClientesHorario, setCitaCliente, setForzarFollowUp, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
+import { setClientesEnabled, setClientesHorario, setCitaCliente, setForzarFollowUp, crearRetiroManual, triggerCalls, enqueueCalls, resetIvr, createList, updateList } from '../api';
 import Pager from './Pager';
 import QueuePanel from './QueuePanel';
 import SchedulePanel from './SchedulePanel';
@@ -285,6 +285,21 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
       `(para probar con un cliente real). Sigue contando como cliente real.\n\n¿Continuar?`)) return;
     return run(() => setForzarFollowUp(c.phone, on),
       on ? `Follow up forzado para ${c.name}: lo llama aunque no tenga vencido.` : `${c.name} vuelve a la regla normal (sin vencido no se llama).`);
+  };
+
+  // Super admins: retiro a mano (p. ej. una prueba con un cliente real). Va a logística como cualquier retiro.
+  const crearRetiro = (c) => {
+    const m = window.prompt(`Crear retiro para ${c.name}\n\nMonto a retirar (RD$):`, c.deuda_vencida > 0 ? String(c.deuda_vencida) : '');
+    if (m == null) return;
+    const monto = Number(String(m).replace(/[^\d.]/g, ''));
+    if (!(monto > 0)) { setMsg({ type: 'err', text: 'Escribe un monto mayor que 0.' }); return; }
+    const nota = window.prompt('Nota para logística (opcional):', 'Retiro de prueba');
+    if (nota == null) return;
+    if (!window.confirm(`¿Crear un retiro de RD$ ${monto.toLocaleString('en-US')} para ${c.name}, para hoy?\n\n` +
+      'Sale en 🙋 Por atender → 🚚 Retiros y se manda a logística en el próximo minuto como un retiro REAL. ' +
+      'No se le llama. Se deshace con "No es retiro".')) return;
+    return run(() => crearRetiroManual(c.phone, monto, null, nota),
+      (r) => `Retiro creado para ${r.cliente}: RD$ ${Number(r.monto).toLocaleString('en-US')} para ${r.fecha}. Va a logística en el próximo minuto.`);
   };
 
   const llamar = (phones) => {
@@ -795,6 +810,10 @@ export default function ClientesTable({ clientes, llamadas = [], retiros = [], c
                             <button className="row-menu__item" disabled={busy} onClick={() => { setMenu(null); forzar(c, !c.forzarFollowUp); }}
                               title="Pruebas: que el follow up lo llame aunque no tenga vencido o tenga IVR">
                               🧪 {c.forzarFollowUp ? 'Quitar follow up forzado' : 'Forzar follow up'} <span className="row-menu__sa">super admin</span>
+                            </button>
+                            <button className="row-menu__item" disabled={busy} onClick={() => { setMenu(null); crearRetiro(c); }}
+                              title="Crear un retiro a mano (p. ej. una prueba): se manda a logística como cualquier retiro">
+                              🚚 Crear retiro <span className="row-menu__sa">super admin</span>
                             </button>
                           </>
                         )}
